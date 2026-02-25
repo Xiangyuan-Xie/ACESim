@@ -8,8 +8,8 @@ from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 
 
-def _detect_acetele_root() -> Path:
-    spec = importlib.util.find_spec("acetele")
+def _detect_acesim_root() -> Path:
+    spec = importlib.util.find_spec("acesim")
     if spec is not None:
         locations = spec.submodule_search_locations
         if locations:
@@ -17,21 +17,21 @@ def _detect_acetele_root() -> Path:
         origin = spec.origin
         if origin:
             return Path(origin).resolve().parent
-    env = os.environ.get("ACETELE_ROOT")
+    env = os.environ.get("ACESIM_ROOT")
     if env:
         return Path(env).resolve()
-    raise RuntimeError("Failed to locate ACETele repository; set ACETELE_ROOT or pass px4_repo")
+    raise RuntimeError("Failed to locate ACESim repository; set ACESIM_ROOT or pass px4_repo")
 
 
 def _load_px4_repo_path(override: Optional[str]) -> str:
     if isinstance(override, str) and override.strip():
         value = Path(override.strip())
         if not value.is_absolute():
-            base = _detect_acetele_root()
+            base = _detect_acesim_root()
             value = (base / value).resolve()
         return str(value)
-    base = _detect_acetele_root()
-    return str((base / "simulation" / "third_party" / "PX4-Autopilot").resolve())
+    base = _detect_acesim_root()
+    return str((base / "third_party" / "aircraft" / "PX4-Autopilot").resolve())
 
 
 def _launch_setup(context):
@@ -58,7 +58,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "px4_repo",
                 default_value="",
-                description="PX4-Autopilot repository path; if empty, auto-detect from ACETele",
+                description="PX4-Autopilot repository path; if empty, auto-detect from ACESim",
             ),
             OpaqueFunction(function=_launch_setup),
         ]
