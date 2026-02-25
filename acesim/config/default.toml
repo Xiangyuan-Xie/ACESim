@@ -1,0 +1,4 @@
+[basic]
+sim_type = "mujoco"
+env_type = "mc_arm"
+asset_name = "x500_arm2x"

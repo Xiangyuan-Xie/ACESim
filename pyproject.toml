@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=65.5.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "acesim"
+version = "0.1.0"
+description = "PX4 + MuJoCo simulation toolkit split from ACETele."
+requires-python = ">=3.9"
+dependencies = [
+    "mujoco",
+    "numpy",
+    "scipy",
+    "pymavlink",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
