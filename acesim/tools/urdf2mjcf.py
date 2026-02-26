@@ -13,7 +13,8 @@ from typing import Dict, List, Optional
 import coacd
 import pinocchio as pin
 import trimesh
-from acetele.utils.math import quat_mul, quat_rotate
+
+from acesim.utils.math import quat_mul, quat_rotate
 
 
 class URDF2MJCFConverter:
