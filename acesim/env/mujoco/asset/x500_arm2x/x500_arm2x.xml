@@ -75,12 +75,8 @@
     <mesh name="gripper_right_decomp_1" file="gripper_right_decomp_1.stl" />
     <mesh name="gripper_right_decomp_2" file="gripper_right_decomp_2.stl" />
     <mesh name="gripper_right_decomp_3" file="gripper_right_decomp_3.stl" />
-    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1=".1 .2 .3" rgb2=".2 .3 .4" />
-    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance="0.2" specular="1.0" shininess="0.5" />
   </asset>
   <worldbody>
-    <light pos="0 0 5" directional="true" diffuse=".8 .8 .8" specular=".5 .5 .5" dir="0 0 -1" castshadow="true" />
-    <geom name="floor" type="plane" material="grid" size="0 0 0.1" pos="0 0 0" group="0" contype="1" conaffinity="1" />
     <body name="base_link" pos="0 0 0.269138">
       <inertial pos="-0.000763566 0.000110304 -0.0391436" quat="0.502318 0.509049 -0.492447 0.496026" mass="0.68805" diaginertia="0.0157539 0.0127367 0.0122218" />
       <joint name="floating_base_joint" type="free" />

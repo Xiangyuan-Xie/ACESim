@@ -1,4 +1,5 @@
 [basic]
 sim_type = "mujoco"
 env_type = "mc_arm"
+scene_name = "default"
 asset_name = "x500_arm2x"

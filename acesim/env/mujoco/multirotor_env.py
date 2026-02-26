@@ -1,6 +1,7 @@
 import platform
 import re
 from dataclasses import dataclass
+from typing import Any, Dict, Sequence
 
 import mujoco
 import numpy as np
@@ -29,9 +30,7 @@ class MultirotorEnv(MujocoEnv):
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
         self._px4_interface = PX4Interface()
-        asset_params = config_loader.get_asset_params()
-        self._params = self._load_multirotor_params(asset_params)
-        self._apply_multirotor_overrides(asset_params)
+        self._apply_multirotor_overrides(config_loader.get_asset_params())
 
         print("-" * 50)
         if platform.system() == "Windows":
@@ -48,7 +47,7 @@ class MultirotorEnv(MujocoEnv):
         self._initialize_rotor_state()
         self._initialize_sensor_buffers()
 
-    def _load_multirotor_params(self, asset_config):
+    def _load_multirotor_params(self, asset_config: Dict[str, Any]):
         config = asset_config.get("multirotor", asset_config)
         rotor_direction = np.array(config["rotor_direction"], dtype=float)
         return MultirotorParams(
@@ -59,16 +58,16 @@ class MultirotorEnv(MujocoEnv):
             rolling_moment_coeff=float(config["rolling_moment_coeff"]),
         )
 
-    def _apply_multirotor_overrides(self, asset_params):
-        config = asset_params.get("multirotor", asset_params)
-        if "idle_visual_speed" in config:
-            self.IDLE_VISUAL_SPEED = float(config["idle_visual_speed"])
-        if "gps_lat_start" in config:
-            self.GPS_LAT_START = float(config["gps_lat_start"])
-        if "gps_lon_start" in config:
-            self.GPS_LON_START = float(config["gps_lon_start"])
-        if "gps_alt_start" in config:
-            self.GPS_ALT_START = float(config["gps_alt_start"])
+    def _apply_multirotor_overrides(self, asset_params: Dict[str, Any]):
+        self._params = self._load_multirotor_params(asset_params)
+        if "idle_visual_speed" in asset_params:
+            self.IDLE_VISUAL_SPEED = float(asset_params["idle_visual_speed"])
+        if "gps_lat_start" in asset_params:
+            self.GPS_LAT_START = float(asset_params["gps_lat_start"])
+        if "gps_lon_start" in asset_params:
+            self.GPS_LON_START = float(asset_params["gps_lon_start"])
+        if "gps_alt_start" in asset_params:
+            self.GPS_ALT_START = float(asset_params["gps_alt_start"])
 
     def _initialize_multirotor_handles(self):
         self._base_link_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_BODY, "base_link")
@@ -119,7 +118,7 @@ class MultirotorEnv(MujocoEnv):
                 indices.append(int(match.group(1)))
         return sorted(set(indices))
 
-    def _resolve_rotor_bodies(self, rotor_indices):
+    def _resolve_rotor_bodies(self, rotor_indices: Sequence[int]):
         body_names = []
         body_ids = []
         valid_indices = []
@@ -304,7 +303,7 @@ class MultirotorEnv(MujocoEnv):
     def _update_custom_control(self):
         pass
 
-    def control(self, model: mujoco.MjModel, data: mujoco.MjData):
+    def _control(self, model: mujoco.MjModel, data: mujoco.MjData):
         self._step_count += 1
         self._simulation_time_us += int(model.opt.timestep * 1e6)
         if not self._px4_interface.is_connected:

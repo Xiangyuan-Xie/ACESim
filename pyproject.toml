@@ -20,6 +20,7 @@ dependencies = [
     "mujoco",
     "numpy",
     "scipy",
+    "tqdm",
     "pymavlink",
 ]
 

@@ -1,4 +1,5 @@
 mujoco
 numpy
 scipy
+tqdm
 pymavlink

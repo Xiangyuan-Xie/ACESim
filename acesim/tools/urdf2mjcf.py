@@ -17,7 +17,7 @@ from acetele.utils.math import quat_mul, quat_rotate
 
 
 class URDF2MJCFConverter:
-    """Convert URDF to MuJoCo MJCF, inject common options/assets/sensors, and post-process."""
+    """Convert URDF to MuJoCo MJCF, inject common options/sensors, and post-process."""
 
     # Constants
     MUJOCO_COMPILER_TAG = textwrap.dedent("""
@@ -35,7 +35,7 @@ class URDF2MJCFConverter:
     XML_OPTION_TAG = textwrap.dedent("""
         <option
             density="1.225"
-            timestep="0.002"
+            timestep="0.001"
             integrator="implicit"
             viscosity="1.8e-5"
             cone="elliptic"
@@ -74,18 +74,6 @@ class URDF2MJCFConverter:
         "ctrllimited",
         "forcelimited",
     ]
-
-    XML_ASSET_TAG = textwrap.dedent("""
-        <texture name="grid" type="2d" builtin="checker" width="512" height="512"
-                 rgb1=".1 .2 .3" rgb2=".2 .3 .4"/>
-        <material name="grid" texture="grid" texrepeat="1 1" texuniform="true"
-                 reflectance="0.2" specular="1.0" shininess="0.5"/>
-    """).strip()
-
-    XML_WORLD_TAG = textwrap.dedent("""
-        <light directional="true" diffuse=".8 .8 .8" specular=".5 .5 .5" pos="0 0 5" dir="0 0 -1" castshadow="true"/>
-        <geom name="floor" type="plane" pos="0 0 0" size="0 0 0.1" material="grid"/>
-    """).strip()
 
     XML_ACTUATORS_SENSORS = textwrap.dedent("""
         <actuator>
@@ -145,7 +133,7 @@ class URDF2MJCFConverter:
         self.mujoco_bin = mujoco_bin
 
         # Path setup
-        self.base_dir = Path(__file__).parent.parent / "simulation" / "description"
+        self.base_dir = Path(__file__).parent.parent / "env" / "mujoco" / "asset"
         self.urdf_path = self.base_dir / self.target / f"{self.target}.urdf"
         self.mesh_dir = self.urdf_path.parent / "meshes"
         self.xml_path = self.urdf_path.parent / f"{self.target}.xml"
@@ -560,29 +548,17 @@ class URDF2MJCFConverter:
                     else:
                         seen.add(name)
 
-        # 2. Insert World Elements
-        if worldbody is not None and not any(g.get("name") == "floor" for g in worldbody.findall("geom")):
-            self.inject_xml(worldbody, self.XML_WORLD_TAG, 0)
-
-        # 3. Insert Compiler Options
+        # 2. Insert Compiler Options
         if root.find("option") is None:
             compiler = root.find("compiler")
             idx = list(root).index(compiler) if compiler is not None else 0
             self.inject_xml(root, self.XML_OPTION_TAG, idx + 1)
 
-        # 4. Insert Assets
-        asset = root.find("asset")
-        if asset is None:
-            asset = ET.Element("asset")
-            root.insert(0, asset)
-        if not any(t.get("name") == "grid" for t in asset.findall("texture")):
-            self.inject_xml(asset, self.XML_ASSET_TAG)
-
-        # 5. Insert Actuators & Sensors
+        # 3. Insert Actuators & Sensors
         if root.find("actuator") is None:
             self.inject_xml(root, self.XML_ACTUATORS_SENSORS)
 
-        # 6. Add Sites
+        # 4. Add Sites
         if worldbody is not None:
             base_body = None
             for body in root.iter("body"):

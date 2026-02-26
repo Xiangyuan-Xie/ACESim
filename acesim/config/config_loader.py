@@ -19,7 +19,6 @@ class ConfigLoader:
             self._config = tomli.load(f)
 
         asset_config_path = config_path.parent / self.get_sim_type() / f"{self.get_asset_name()}.toml"
-        print(asset_config_path)
         with open(asset_config_path, "rb") as f:
             self._asset_config = tomli.load(f)
 
@@ -39,6 +38,9 @@ class ConfigLoader:
                 raise ValueError(f"Env type '{env_type}' not supported for sim type '{sim_type}'")
         else:
             raise ValueError(f"Sim type '{sim_type}' not supported")
+
+    def get_scene_name(self) -> str:
+        return self._config["basic"]["scene_name"]
 
     def get_asset_name(self) -> str:
         return self._config["basic"]["asset_name"]
