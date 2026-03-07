@@ -8,7 +8,7 @@ class BaseEnv(ABC):
         self._config_loader = config_loader
 
     @abstractmethod
-    def run(self, visualize=True):
+    def run(self):
         pass
 
     @abstractmethod

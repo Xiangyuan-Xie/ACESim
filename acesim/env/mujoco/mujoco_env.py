@@ -4,7 +4,6 @@ from pathlib import Path
 
 import mujoco
 import mujoco.viewer
-from tqdm import tqdm
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.base_env import BaseEnv
@@ -21,19 +20,20 @@ class MujocoEnv(BaseEnv):
         self._mj_model = mujoco.MjModel.from_xml_string(merged_xml)
         self._mj_data = mujoco.MjData(self._mj_model)
         self._mj_model.opt.timestep = 0.001
-        mujoco.mj_resetData(self._mj_model, self._mj_data)
+        if self._mj_model.nkey > 0:
+            mujoco.mj_resetDataKeyframe(self._mj_model, self._mj_data, 0)
+        else:
+            mujoco.mj_resetData(self._mj_model, self._mj_data)
+        mujoco.set_mjcb_control(self._control)
 
         self._simulation_time_us = 0
         self._step_count = 0
 
-    def run(self, steps: int = 0):
-        if steps <= 0:
-            mujoco.set_mjcb_control(self._control)
-            mujoco.viewer.launch(self._mj_model, self._mj_data)
-        else:
-            for _ in tqdm(range(steps)):
-                mujoco.set_mjcb_control(self._control)
-                mujoco.mj_step(self._mj_model, self._mj_data)
+    def run(self):
+        mujoco.viewer.launch(self._mj_model, self._mj_data)
+
+    def step(self):
+        mujoco.mj_step(self._mj_model, self._mj_data)
 
     def close(self):
         pass
