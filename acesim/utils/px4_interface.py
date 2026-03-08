@@ -1,9 +1,13 @@
+import os
+from typing import Optional
+
 from pymavlink import mavutil
 
 
 class PX4Interface:
-    def __init__(self, host="127.0.0.1", port=4560):
-        self._host = host
+    def __init__(self, host: Optional[str] = None, port: int = 4560):
+        env_host = os.environ.get("ACESIM_PX4_HOST")
+        self._host = host or env_host or "0.0.0.0"
         self._port = port
         self._mavlink_connection = None
         self._is_connected = False
@@ -161,15 +165,26 @@ class PX4Interface:
             satellites_visible,
         )
 
-    def read_actuator_controls(self):
+    def read_actuator_controls(self, blocking: bool = False, timeout_s: float = 0.0):
         """Read actuator controls from HIL_ACTUATOR_CONTROLS messages."""
         if not self._is_connected:
             return None
 
         if self._mavlink_connection:
-            msg = self._mavlink_connection.recv_match(type="HIL_ACTUATOR_CONTROLS", blocking=False)
+            if blocking:
+                msg = self._mavlink_connection.recv_match(
+                    type="HIL_ACTUATOR_CONTROLS", blocking=True, timeout=max(timeout_s, 0.0)
+                )
+            else:
+                msg = self._mavlink_connection.recv_match(type="HIL_ACTUATOR_CONTROLS", blocking=False)
             if msg:
-                return msg.controls
+                latest_controls = msg.controls
+                while True:
+                    msg = self._mavlink_connection.recv_match(type="HIL_ACTUATOR_CONTROLS", blocking=False)
+                    if not msg:
+                        break
+                    latest_controls = msg.controls
+                return latest_controls
 
         return None
 
