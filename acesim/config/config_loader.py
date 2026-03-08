@@ -47,3 +47,6 @@ class ConfigLoader:
 
     def get_asset_params(self) -> Dict[str, Any]:
         return self._asset_config["params"]
+
+    def get_benchmark(self) -> str:
+        return self._config["basic"]["benchmark"]

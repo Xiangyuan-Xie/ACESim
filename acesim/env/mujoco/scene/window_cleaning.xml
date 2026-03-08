@@ -11,26 +11,27 @@
   </asset>
   <worldbody>
     <light pos="0 0 5" directional="true" diffuse=".8 .8 .8" specular=".5 .5 .5" dir="0 0 -1" castshadow="true" />
-    <geom name="floor" type="plane" material="grid" size="0 0 0.1" pos="0 0 0" group="0" contype="1" conaffinity="1" />
+    <geom name="floor" type="plane" material="grid" size="0 0 0.1" pos="0 0 0" group="0" contype="1" conaffinity="1" friction="0.6 0.005 0.0001" />
     <body name="table" pos="1.5 0 0" quat="0.70710678 0 0 0.70710678">
       <joint name="table_joint" type="free" />
-      <geom name="tabletop" type="box" size="0.6 0.3 0.02" pos="0 0 0.75" material="table_wood" mass="15" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
-      <geom name="table_leg_fl" type="box" size="0.03 0.03 0.365" pos="0.55 0.25 0.365" material="table_wood" mass="1" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
-      <geom name="table_leg_fr" type="box" size="0.03 0.03 0.365" pos="0.55 -0.25 0.365" material="table_wood" mass="1" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
-      <geom name="table_leg_rl" type="box" size="0.03 0.03 0.365" pos="-0.55 0.25 0.365" material="table_wood" mass="1" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
-      <geom name="table_leg_rr" type="box" size="0.03 0.03 0.365" pos="-0.55 -0.25 0.365" material="table_wood" mass="1" contype="1" conaffinity="1" friction="1 0.005 0.0001" />
+      <geom name="tabletop" type="box" size="0.6 0.3 0.02" pos="0 0 0.75" material="table_wood" mass="15" contype="1" conaffinity="1" friction="0.5 0.005 0.0001" />
+      <geom name="table_leg_fl" type="box" size="0.03 0.03 0.365" pos="0.55 0.25 0.365" material="table_wood" mass="1" contype="1" conaffinity="1" friction="0.5 0.005 0.0001" />
+      <geom name="table_leg_fr" type="box" size="0.03 0.03 0.365" pos="0.55 -0.25 0.365" material="table_wood" mass="1" contype="1" conaffinity="1" friction="0.5 0.005 0.0001" />
+      <geom name="table_leg_rl" type="box" size="0.03 0.03 0.365" pos="-0.55 0.25 0.365" material="table_wood" mass="1" contype="1" conaffinity="1" friction="0.5 0.005 0.0001" />
+      <geom name="table_leg_rr" type="box" size="0.03 0.03 0.365" pos="-0.55 -0.25 0.365" material="table_wood" mass="1" contype="1" conaffinity="1" friction="0.5 0.005 0.0001" />
     </body>
-    <body name="window_squeegee" pos="1.5 0 0.796">
+    <body name="window_squeegee" pos="1.5 0 0.8">
       <joint name="squeegee_joint" type="free" damping="0.1" />
-      <geom name="squeegee_handle" type="cylinder" size="0.015 0.06" pos="0 0 0.002" quat="0.70710678 0 0.70710678 0" material="squeegee_handle" mass="0.08" contype="1" conaffinity="1" friction="0.9 0.01 0.0002" />
-      <geom name="squeegee_blade" type="box" size="0.08 0.02 0.006" pos="0 0 -0.02" material="squeegee_rubber" mass="0.05" contype="1" conaffinity="1" friction="1.1 0.01 0.0002" />
+      <geom name="squeegee_head" type="box" size="0.1 0.015 0.008" pos="0 0 0" material="squeegee_handle" mass="0.05" contype="1" conaffinity="1" friction="0.4 0.005 0.0001" />
+      <geom name="squeegee_blade" type="box" size="0.1 0.002 0.008" pos="0 -0.017 -0.008" material="squeegee_rubber" mass="0.03" contype="1" conaffinity="1" friction="1.5 0.02 0.001" solimp="0.9 0.95 0.001 0.5 2" solref="0.02 1" />
+      <geom name="squeegee_handle" type="cylinder" size="0.009" fromto="0 0.015 0  0 0.155 0" material="squeegee_handle" mass="0.07" contype="1" conaffinity="1" friction="0.4 0.005 0.0001" />
     </body>
     <body name="office_wall" pos="2.6 0 0">
       <geom name="wall_left" type="box" size="0.05 0.1 1.3" pos="0 1.35 1.3" material="wall_concrete" mass="200" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" />
       <geom name="wall_right" type="box" size="0.05 0.1 1.3" pos="0 -1.35 1.3" material="wall_concrete" mass="200" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" />
       <geom name="wall_top" type="box" size="0.05 1.25 0.2" pos="0 0 2.4" material="wall_concrete" mass="200" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" />
       <geom name="wall_bottom" type="box" size="0.05 1.25 0.2" pos="0 0 0.2" material="wall_concrete" mass="200" contype="1" conaffinity="1" friction="0.8 0.005 0.0001" />
-      <geom name="window_glass" type="box" size="0.005 1.25 0.9" pos="0 0 1.3" material="glass_window" mass="20" contype="1" conaffinity="1" friction="0.3 0.005 0.0001" />
+      <geom name="window_glass" type="box" size="0.005 1.25 0.9" pos="0 0 1.3" material="glass_window" mass="20" contype="1" conaffinity="1" friction="0.2 0.001 0.0001" />
     </body>
   </worldbody>
 </mujoco>
