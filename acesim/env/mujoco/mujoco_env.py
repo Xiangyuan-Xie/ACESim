@@ -10,6 +10,7 @@ from acesim.env.base_env import BaseEnv
 
 
 class MujocoEnv(BaseEnv):
+    # === Model Initialization ===
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
         scene_name = self._config_loader.get_scene_name()
@@ -29,6 +30,7 @@ class MujocoEnv(BaseEnv):
         self._simulation_time_us = 0
         self._step_count = 0
 
+    # === Runtime Lifecycle ===
     def run(self):
         mujoco.viewer.launch(self._mj_model, self._mj_data)
 
@@ -38,6 +40,7 @@ class MujocoEnv(BaseEnv):
     def close(self):
         pass
 
+    # === XML Composition ===
     def _merge_scene_robot_xml(self, scene_path: Path, robot_path: Path) -> str:
         scene_root = ET.parse(scene_path).getroot()
         robot_root = ET.parse(robot_path).getroot()
@@ -75,5 +78,6 @@ class MujocoEnv(BaseEnv):
 
         return ET.tostring(scene_root, encoding="unicode")
 
+    # === Control Callback ===
     def _control(self, model: mujoco.MjModel, data: mujoco.MjData):
         pass

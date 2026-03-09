@@ -1,7 +1,7 @@
 import platform
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Sequence, Tuple
 
 import mujoco
 import numpy as np
@@ -19,9 +19,11 @@ class MultirotorParams:
     moment_constant: float
     rotor_drag_coeff: float
     rolling_moment_coeff: float
+    rotor_radius: float
 
 
 class MultirotorEnv(MujocoEnv):
+    # === Tunable Constants ===
     IDLE_VISUAL_SPEED = 55.0
     GPS_LAT_START = 39.98329
     GPS_LON_START = 116.34745
@@ -30,7 +32,19 @@ class MultirotorEnv(MujocoEnv):
     MAG_RATE_HZ = 100.0
     BARO_RATE_HZ = 50.0
     GPS_RATE_HZ = 30.0
+    GROUND_Z_M = 0.0
+    GROUND_EFFECT_MIN_HEIGHT_M = 0.03
+    GROUND_EFFECT_FADE_HEIGHT_M = 0.8
+    GROUND_EFFECT_MAX_GAIN = 1.35
+    DOWNWASH_FORCE_COEFF = 0.22
+    DOWNWASH_VERTICAL_DECAY_M = 0.45
+    DOWNWASH_LATERAL_DECAY_M = 0.2
+    DOWNWASH_MAX_RADIUS_M = 0.45
+    DOWNWASH_MIN_VERTICAL_SEPARATION_M = 0.02
+    DOWNWASH_CONE_SPREAD_TAN = 0.35
+    DOWNWASH_ENV_FORCE_COEFF = 0.18
 
+    # === Initialization ===
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
         self._px4_interface = PX4Interface()
@@ -52,6 +66,7 @@ class MultirotorEnv(MujocoEnv):
         self._configure_update_timing()
         self._initialize_sensor_buffers()
 
+    # === Parameter Loading ===
     def _load_multirotor_params(self, asset_config: Dict[str, Any]):
         config = asset_config.get("multirotor", asset_config)
         rotor_direction = np.array(config["rotor_direction"], dtype=float)
@@ -61,6 +76,7 @@ class MultirotorEnv(MujocoEnv):
             moment_constant=float(config["moment_constant"]),
             rotor_drag_coeff=float(config["rotor_drag_coeff"]),
             rolling_moment_coeff=float(config["rolling_moment_coeff"]),
+            rotor_radius=float(config["rotor_radius"]),
         )
 
     def _apply_multirotor_overrides(self, asset_params: Dict[str, Any]):
@@ -73,7 +89,61 @@ class MultirotorEnv(MujocoEnv):
             self.GPS_LON_START = float(asset_params["gps_lon_start"])
         if "gps_alt_start" in asset_params:
             self.GPS_ALT_START = float(asset_params["gps_alt_start"])
+        if "ground_z_m" in asset_params:
+            self.GROUND_Z_M = float(asset_params["ground_z_m"])
+        if "ground_effect_min_height_m" in asset_params:
+            self.GROUND_EFFECT_MIN_HEIGHT_M = float(asset_params["ground_effect_min_height_m"])
+        if "ground_effect_fade_height_m" in asset_params:
+            self.GROUND_EFFECT_FADE_HEIGHT_M = float(asset_params["ground_effect_fade_height_m"])
+        if "ground_effect_max_gain" in asset_params:
+            self.GROUND_EFFECT_MAX_GAIN = float(asset_params["ground_effect_max_gain"])
+        if "downwash_force_coeff" in asset_params:
+            self.DOWNWASH_FORCE_COEFF = float(asset_params["downwash_force_coeff"])
+        if "downwash_vertical_decay_m" in asset_params:
+            self.DOWNWASH_VERTICAL_DECAY_M = float(asset_params["downwash_vertical_decay_m"])
+        if "downwash_lateral_decay_m" in asset_params:
+            self.DOWNWASH_LATERAL_DECAY_M = float(asset_params["downwash_lateral_decay_m"])
+        if "downwash_max_radius_m" in asset_params:
+            self.DOWNWASH_MAX_RADIUS_M = float(asset_params["downwash_max_radius_m"])
+        if "downwash_min_vertical_separation_m" in asset_params:
+            self.DOWNWASH_MIN_VERTICAL_SEPARATION_M = float(asset_params["downwash_min_vertical_separation_m"])
+        if "downwash_cone_spread_tan" in asset_params:
+            self.DOWNWASH_CONE_SPREAD_TAN = float(asset_params["downwash_cone_spread_tan"])
+        if "downwash_env_force_coeff" in asset_params:
+            self.DOWNWASH_ENV_FORCE_COEFF = float(asset_params["downwash_env_force_coeff"])
 
+    # === Aerodynamic Models ===
+    def _compute_ground_effect_gain(self, rotor_height_m: float):
+        if rotor_height_m >= self.GROUND_EFFECT_FADE_HEIGHT_M:
+            return 1.0
+        effective_height = max(rotor_height_m, self.GROUND_EFFECT_MIN_HEIGHT_M)
+        ratio = self._params.rotor_radius / (4.0 * effective_height)
+        ratio_sq = np.clip(ratio * ratio, 0.0, 0.95)
+        ideal_gain = 1.0 / (1.0 - ratio_sq)
+        fade = 1.0 - np.clip(rotor_height_m / self.GROUND_EFFECT_FADE_HEIGHT_M, 0.0, 1.0)
+        gain = 1.0 + (ideal_gain - 1.0) * fade
+        return float(np.clip(gain, 1.0, self.GROUND_EFFECT_MAX_GAIN))
+
+    def _compute_downwash_force_w(
+        self, rotor_index: int, rotor_positions_w: np.ndarray, rotor_thrusts: np.ndarray, downwash_dir_w: np.ndarray
+    ):
+        downwash_force = 0.0
+        for j in range(self._rotor_count):
+            if j == rotor_index:
+                continue
+            rel_w = rotor_positions_w[rotor_index] - rotor_positions_w[j]
+            axial_sep = float(np.dot(rel_w, downwash_dir_w))
+            if axial_sep <= self.DOWNWASH_MIN_VERTICAL_SEPARATION_M:
+                continue
+            lateral_sep = float(np.linalg.norm(rel_w - axial_sep * downwash_dir_w))
+            if lateral_sep >= self.DOWNWASH_MAX_RADIUS_M:
+                continue
+            lateral_decay = np.exp(-lateral_sep / max(self.DOWNWASH_LATERAL_DECAY_M, 1e-6))
+            vertical_decay = np.exp(-axial_sep / max(self.DOWNWASH_VERTICAL_DECAY_M, 1e-6))
+            downwash_force += self.DOWNWASH_FORCE_COEFF * rotor_thrusts[j] * lateral_decay * vertical_decay
+        return downwash_dir_w * downwash_force
+
+    # === MuJoCo Handle Resolution ===
     def _initialize_multirotor_handles(self):
         self._base_link_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_BODY, "base_link")
         rotor_indices = self._find_rotor_indices_from_sites()
@@ -91,7 +161,60 @@ class MultirotorEnv(MujocoEnv):
             "accel": mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "accelerometer"),
             "mag": mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "magnetometer"),
         }
+        self._initialize_downwash_targets()
 
+    # === Downwash Targets ===
+    def _initialize_downwash_targets(self):
+        parent = self._mj_model.body_parentid
+        target_body_ids = []
+        for body_id in range(1, self._mj_model.nbody):
+            if body_id == self._base_link_id:
+                continue
+            if self._mj_model.body_mocapid[body_id] >= 0:
+                continue
+            if self._mj_model.body_mass[body_id] <= 0.0:
+                continue
+            if self._mj_model.body_dofnum[body_id] <= 0:
+                continue
+            cursor = body_id
+            is_multirotor_subtree = False
+            while cursor > 0:
+                if cursor == self._base_link_id:
+                    is_multirotor_subtree = True
+                    break
+                cursor = parent[cursor]
+            if is_multirotor_subtree:
+                continue
+            target_body_ids.append(body_id)
+        self._downwash_target_body_ids = np.array(target_body_ids, dtype=int)
+
+    def _apply_downwash_to_environment(
+        self, rotor_positions_w: np.ndarray, rotor_thrusts: np.ndarray, downwash_dir_w: np.ndarray
+    ):
+        if self._downwash_target_body_ids.size == 0:
+            return
+        for body_id in self._downwash_target_body_ids:
+            body_pos_w = self._mj_data.xipos[body_id]
+            total_force_w = np.zeros(3)
+            for rotor_i in range(self._rotor_count):
+                rel_w = body_pos_w - rotor_positions_w[rotor_i]
+                axial_sep = float(np.dot(rel_w, downwash_dir_w))
+                if axial_sep <= self.DOWNWASH_MIN_VERTICAL_SEPARATION_M:
+                    continue
+                cone_radius = self._params.rotor_radius + axial_sep * self.DOWNWASH_CONE_SPREAD_TAN
+                effective_radius = min(self.DOWNWASH_MAX_RADIUS_M, cone_radius)
+                if effective_radius <= 1e-6:
+                    continue
+                lateral_sep = float(np.linalg.norm(rel_w - axial_sep * downwash_dir_w))
+                if lateral_sep >= effective_radius:
+                    continue
+                vertical_decay = np.exp(-axial_sep / max(self.DOWNWASH_VERTICAL_DECAY_M, 1e-6))
+                lateral_decay = np.exp(-((lateral_sep / effective_radius) ** 2))
+                force_mag = self.DOWNWASH_ENV_FORCE_COEFF * rotor_thrusts[rotor_i] * vertical_decay * lateral_decay
+                total_force_w += downwash_dir_w * force_mag
+            self._mj_data.xfrc_applied[body_id, :3] += total_force_w
+
+    # === Sensor Buffer and Timing ===
     def _initialize_sensor_buffers(self):
         self._last_accel_frd = np.zeros(3)
         self._last_gyro_frd = np.zeros(3)
@@ -112,6 +235,7 @@ class MultirotorEnv(MujocoEnv):
         self._gps_elapsed_s = 0.0
         self._hil_sensor_sent = False
 
+    # === Rotor Discovery and Geometry ===
     def _find_rotor_indices_from_sites(self):
         indices = []
         for site_id in range(self._mj_model.nsite):
@@ -165,6 +289,7 @@ class MultirotorEnv(MujocoEnv):
                 rotor_offsets.append(self._mj_model.body_pos[body_id] - base_pos)
         return np.array(rotor_offsets)
 
+    # === Rotor State and Sensor Access ===
     def _initialize_rotor_state(self):
         self._rotor_count = len(self._rotor_body_ids)
         self._desired_rotor_angular_velocity = np.zeros(self._rotor_count)
@@ -183,6 +308,7 @@ class MultirotorEnv(MujocoEnv):
         adr = self._mj_model.sensor_adr[sensor_id]
         return self._mj_data.sensordata[adr : adr + self._mj_model.sensor_dim[sensor_id]].copy()
 
+    # === Sensor Noise Models ===
     def _get_accel_with_noise(self):
         sensor_value = self._get_sensor_raw("accel")
         sensor_value += np.random.normal(0, [0.00637, 0.00637, 0.00686])
@@ -198,12 +324,16 @@ class MultirotorEnv(MujocoEnv):
         sensor_value += np.random.normal(0, 0.003, size=3)
         return np.array([sensor_value[0], -sensor_value[1], -sensor_value[2]])
 
+    # === PX4 HIL Bridge ===
     def _update_sensors_and_send(self):
+        # [1] Update task timers
         dt = self._mj_model.opt.timestep
         self._hil_sensor_sent = False
         self._mag_elapsed_s += dt
         self._baro_elapsed_s += dt
         self._hil_sensor_elapsed_s += dt
+
+        # [2] Refresh low-rate sensor caches
         if self._mag_elapsed_s >= self._mag_period_s:
             self._last_mag_frd = self._get_mag_with_noise()
             self._mag_elapsed_s -= self._mag_period_s
@@ -211,6 +341,8 @@ class MultirotorEnv(MujocoEnv):
             position_sensor = self._get_sensor_raw("pos")
             self._last_baro_altitude_m = position_sensor[2] + self.GPS_ALT_START + np.random.normal(0, 0.25)
             self._baro_elapsed_s -= self._baro_period_s
+
+        # [3] Send HIL_SENSOR at fixed rate
         if self._hil_sensor_elapsed_s >= self._hil_sensor_period_s:
             self._last_accel_frd = self._get_accel_with_noise()
             self._last_gyro_frd = self._get_gyro_with_noise()
@@ -252,6 +384,7 @@ class MultirotorEnv(MujocoEnv):
                 desired[:count] = np.array(controls[:count]) * 1000
                 self._desired_rotor_angular_velocity = np.clip(desired, 0, 1000)
 
+    # === GPS Observation Models ===
     def _get_gps_pos_with_noise(self):
         pos = self._get_sensor_raw("pos")
         pos_noisy = pos + np.random.normal(0, 0.01, size=3)
@@ -271,44 +404,95 @@ class MultirotorEnv(MujocoEnv):
         cog_deg = (np.degrees(cog_rad) + 360.0) % 360.0
         return int(vel), int(vn), int(ve), int(vd), int(cog_deg * 100.0)
 
-    def _apply_motor_physics(self):
-        dt = self._mj_model.opt.timestep
+    # === Rotor Dynamics and Force Application ===
+    def _update_rotor_speed_state(self, dt: float):
         for i in range(self._rotor_count):
             diff = self._desired_rotor_angular_velocity[i] - self._rotor_angular_velocity[i]
             tc = 0.0125 if diff > 0 else 0.025
             self._rotor_angular_velocity[i] += diff * (1.0 - np.exp(-dt / tc))
+
+    def _get_base_kinematics(self) -> Tuple[np.ndarray, Rotation, Rotation, np.ndarray, np.ndarray, np.ndarray]:
         base_pos = self._get_sensor_raw("pos")
         base_quat = self._get_sensor_raw("quat")
-        Rb = Rotation.from_quat(base_quat, scalar_first=True)
+        rb = Rotation.from_quat(base_quat, scalar_first=True)
+        rb_inv = rb.inv()
+        thrust_axis_w = rb.apply(np.array([0.0, 0.0, 1.0]))
         v_com_w = self._get_sensor_raw("linvel")
         omega_r = self._get_sensor_raw("gyro")
-        omega_w = Rb.apply(omega_r)
-        self._mj_data.xfrc_applied[self._base_link_id][:] = 0.0
-        self._mj_data.qfrc_applied[:] = 0.0
+        omega_w = rb.apply(omega_r)
+        return base_pos, rb, rb_inv, thrust_axis_w, v_com_w, omega_w
+
+    def _compute_rotor_wrenches(
+        self, base_pos: np.ndarray, rb: Rotation, rb_inv: Rotation, v_com_w: np.ndarray, omega_w: np.ndarray
+    ):
+        rotor_positions_w = np.zeros((self._rotor_count, 3))
+        rotor_thrusts = np.zeros(self._rotor_count)
+        rotor_force_w = np.zeros((self._rotor_count, 3))
+        rotor_moment_w = np.zeros((self._rotor_count, 3))
         for i in range(self._rotor_count):
-            r_off_w = Rb.apply(self._rotor_offsets[i])
+            r_off_w = rb.apply(self._rotor_offsets[i])
+            pos_w = base_pos + r_off_w
+            rotor_positions_w[i] = pos_w
             v_point_w = v_com_w + np.cross(omega_w, r_off_w)
-            v_point_r = Rb.inv().apply(v_point_w)
+            v_point_r = rb_inv.apply(v_point_w)
             v_planar_r = np.array([v_point_r[0], v_point_r[1], 0.0])
             omega = self._rotor_angular_velocity[i]
             direction = self._rotor_direction[i]
             thrust = self._params.motor_constant * (omega**2)
+            rotor_height_m = max(pos_w[2] - self.GROUND_Z_M, 0.0)
+            thrust *= self._compute_ground_effect_gain(rotor_height_m)
+            rotor_thrusts[i] = thrust
             torque_z_r = self._params.moment_constant * thrust * (-direction)
             f_drag_r = -self._params.rotor_drag_coeff * omega * v_planar_r
             m_rolling_r = -self._params.rolling_moment_coeff * omega * v_planar_r
-            f_total_w = Rb.apply(np.array([0.0, 0.0, thrust]) + f_drag_r)
-            m_react_w = Rb.apply(np.array([0.0, 0.0, torque_z_r]) + m_rolling_r)
-            pos_w = base_pos + r_off_w
+            rotor_force_w[i] = rb.apply(np.array([0.0, 0.0, thrust]) + f_drag_r)
+            rotor_moment_w[i] = rb.apply(np.array([0.0, 0.0, torque_z_r]) + m_rolling_r)
+        return rotor_positions_w, rotor_thrusts, rotor_force_w, rotor_moment_w
+
+    def _apply_rotor_wrenches(
+        self,
+        rotor_positions_w: np.ndarray,
+        rotor_thrusts: np.ndarray,
+        rotor_force_w: np.ndarray,
+        rotor_moment_w: np.ndarray,
+        downwash_dir_w: np.ndarray,
+    ):
+        self._mj_data.xfrc_applied[:] = 0.0
+        self._mj_data.qfrc_applied[:] = 0.0
+        for i in range(self._rotor_count):
+            f_total_w = rotor_force_w[i] + self._compute_downwash_force_w(
+                i, rotor_positions_w, rotor_thrusts, downwash_dir_w
+            )
+            m_react_w = rotor_moment_w[i]
             mujoco.mj_applyFT(
                 self._mj_model,
                 self._mj_data,
                 f_total_w,
                 m_react_w,
-                pos_w,
+                rotor_positions_w[i],
                 self._base_link_id,
                 self._mj_data.qfrc_applied,
             )
+        self._apply_downwash_to_environment(rotor_positions_w, rotor_thrusts, downwash_dir_w)
 
+    def _apply_motor_physics(self):
+        # [1] Rotor speed lag update
+        dt = self._mj_model.opt.timestep
+        self._update_rotor_speed_state(dt)
+
+        # [2] Base kinematics in world/body frames
+        base_pos, rb, rb_inv, thrust_axis_w, v_com_w, omega_w = self._get_base_kinematics()
+        downwash_dir_w = -thrust_axis_w
+
+        # [3] Rotor thrust/drag/torque aggregation
+        rotor_positions_w, rotor_thrusts, rotor_force_w, rotor_moment_w = self._compute_rotor_wrenches(
+            base_pos, rb, rb_inv, v_com_w, omega_w
+        )
+
+        # [4] Apply to vehicle and environment
+        self._apply_rotor_wrenches(rotor_positions_w, rotor_thrusts, rotor_force_w, rotor_moment_w, downwash_dir_w)
+
+    # === Visual Update ===
     def _update_rotor_visuals(self):
         base_pos = self._get_sensor_raw("pos")
         base_quat = self._get_sensor_raw("quat")
@@ -328,12 +512,16 @@ class MultirotorEnv(MujocoEnv):
             self._mj_data.mocap_pos[mocap_id] = pos_w
             self._mj_data.mocap_quat[mocap_id] = q_total
 
+    # === Extension Hooks and Main Control Loop ===
     def _update_custom_control(self):
         pass
 
     def _control(self, model: mujoco.MjModel, data: mujoco.MjData):
+        # [1] Advance simulation counters
         self._step_count += 1
         self._simulation_time_us += int(model.opt.timestep * 1e6)
+
+        # [2] PX4 connectivity and closed-loop update
         if not self._px4_interface.is_connected:
             self._px4_interface.update_connection_state()
         else:
@@ -341,8 +529,11 @@ class MultirotorEnv(MujocoEnv):
             self._update_gps_and_send()
             self._update_px4_controls()
             self._apply_motor_physics()
+
+        # [3] Environment-specific control and visualization
         self._update_custom_control()
         self._update_rotor_visuals()
 
+    # === Cleanup ===
     def close(self):
         pass
