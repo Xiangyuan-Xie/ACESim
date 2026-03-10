@@ -18,6 +18,7 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "mujoco",
+    "genesis-world",
     "numpy",
     "scipy",
     "tqdm",

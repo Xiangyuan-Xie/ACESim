@@ -1,4 +1,5 @@
 mujoco
+genesis-world
 numpy
 scipy
 tqdm

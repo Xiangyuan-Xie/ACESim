@@ -7,6 +7,9 @@ _ENV_MAP = {
     "mujoco": {
         "mc_arm": ("acesim.env.mujoco.mc_arm_env", "MCArmEnv"),
     },
+    "genesis": {
+        "mc_arm": ("acesim.env.genesis.mc_arm_env", "MCArmEnv"),
+    },
 }
 
 __all__ = ["ConfigLoader"]
