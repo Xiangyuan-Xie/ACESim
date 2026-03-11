@@ -308,21 +308,27 @@ class MultirotorEnv(MujocoEnv):
         adr = self._mj_model.sensor_adr[sensor_id]
         return self._mj_data.sensordata[adr : adr + self._mj_model.sensor_dim[sensor_id]].copy()
 
+    def _body_flu_to_frd(self, vec_flu: np.ndarray):
+        return np.array([vec_flu[0], -vec_flu[1], -vec_flu[2]])
+
+    def _world_to_ned(self, vec_world: np.ndarray):
+        return np.array([vec_world[0], -vec_world[1], -vec_world[2]])
+
     # === Sensor Noise Models ===
     def _get_accel_with_noise(self):
         sensor_value = self._get_sensor_raw("accel")
         sensor_value += np.random.normal(0, [0.00637, 0.00637, 0.00686])
-        return np.array([sensor_value[0], -sensor_value[1], -sensor_value[2]])
+        return self._body_flu_to_frd(sensor_value)
 
     def _get_gyro_with_noise(self):
         sensor_value = self._get_sensor_raw("gyro")
         sensor_value += np.random.normal(0, 0.0008726646, size=3)
-        return np.array([sensor_value[0], -sensor_value[1], -sensor_value[2]])
+        return self._body_flu_to_frd(sensor_value)
 
     def _get_mag_with_noise(self):
         sensor_value = self._get_sensor_raw("mag") * 10000.0
         sensor_value += np.random.normal(0, 0.003, size=3)
-        return np.array([sensor_value[0], -sensor_value[1], -sensor_value[2]])
+        return self._body_flu_to_frd(sensor_value)
 
     # === PX4 HIL Bridge ===
     def _update_sensors_and_send(self):
@@ -333,14 +339,18 @@ class MultirotorEnv(MujocoEnv):
         self._baro_elapsed_s += dt
         self._hil_sensor_elapsed_s += dt
 
+        hil_sensor_fields = self._px4_interface.HIL_SENSOR_FIELDS_ACCEL | self._px4_interface.HIL_SENSOR_FIELDS_GYRO
+
         # [2] Refresh low-rate sensor caches
         if self._mag_elapsed_s >= self._mag_period_s:
             self._last_mag_frd = self._get_mag_with_noise()
             self._mag_elapsed_s -= self._mag_period_s
+            hil_sensor_fields |= self._px4_interface.HIL_SENSOR_FIELDS_MAG
         if self._baro_elapsed_s >= self._baro_period_s:
             position_sensor = self._get_sensor_raw("pos")
             self._last_baro_altitude_m = position_sensor[2] + self.GPS_ALT_START + np.random.normal(0, 0.25)
             self._baro_elapsed_s -= self._baro_period_s
+            hil_sensor_fields |= self._px4_interface.HIL_SENSOR_FIELDS_BARO
 
         # [3] Send HIL_SENSOR at fixed rate
         if self._hil_sensor_elapsed_s >= self._hil_sensor_period_s:
@@ -352,6 +362,7 @@ class MultirotorEnv(MujocoEnv):
                 self._last_gyro_frd,
                 self._last_mag_frd,
                 self._last_baro_altitude_m,
+                fields_updated=hil_sensor_fields,
             )
             self._hil_sensor_elapsed_s -= self._hil_sensor_period_s
             self._hil_sensor_sent = True
@@ -396,9 +407,10 @@ class MultirotorEnv(MujocoEnv):
     def _get_gps_vel_with_noise(self):
         vel_w = self._get_sensor_raw("linvel")
         vel_w = vel_w + np.random.normal(0, 0.1, size=3)
-        vn = vel_w[0] * 100.0
-        ve = -vel_w[1] * 100.0
-        vd = -vel_w[2] * 100.0
+        vel_ned = self._world_to_ned(vel_w)
+        vn = vel_ned[0] * 100.0
+        ve = vel_ned[1] * 100.0
+        vd = vel_ned[2] * 100.0
         vel = float(np.linalg.norm([vn, ve, vd]))
         cog_rad = np.arctan2(ve, vn)
         cog_deg = (np.degrees(cog_rad) + 360.0) % 360.0

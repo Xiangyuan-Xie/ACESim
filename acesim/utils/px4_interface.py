@@ -5,6 +5,11 @@ from pymavlink import mavutil
 
 
 class PX4Interface:
+    HIL_SENSOR_FIELDS_ACCEL = 0b0000000000111
+    HIL_SENSOR_FIELDS_GYRO = 0b0000000111000
+    HIL_SENSOR_FIELDS_MAG = 0b0001110000000
+    HIL_SENSOR_FIELDS_BARO = 0b1101000000000
+
     def __init__(self, host: Optional[str] = None, port: int = 4560):
         env_host = os.environ.get("ACESIM_PX4_HOST")
         self._host = host or env_host or "0.0.0.0"
@@ -14,6 +19,16 @@ class PX4Interface:
         self._is_armed = False
 
         self._initialize_connection()
+
+    def _set_connected(self):
+        if self._is_connected:
+            return True
+        self._is_connected = True
+        print("-" * 50)
+        print("[PX4 SITL] Connected!")
+        print("[PX4 SITL] QGC should auto-connect via UDP 14550.")
+        print("-" * 50)
+        return True
 
     @property
     def is_connected(self):
@@ -41,12 +56,7 @@ class PX4Interface:
         if self._mavlink_connection:
             msg = self._mavlink_connection.recv_match(type="HEARTBEAT", blocking=False)
             if msg:
-                self._is_connected = True
-                print("-" * 50)
-                print("[PX4 SITL] Connected!")
-                print("[PX4 SITL] QGC should auto-connect via UDP 14550.")
-                print("-" * 50)
-                return True
+                return self._set_connected()
 
         return False
 
@@ -81,9 +91,7 @@ class PX4Interface:
         # ABS_PRESSURE(512) | DIFF_PRESSURE(1024) | PRESSURE_ALT(2048) | TEMPERATURE(4096).
 
         if fields_updated is None:
-            # Default: everything except DIFF_PRESSURE (1024), which is often not present.
-            # Sum = 8191 - 1024 = 7167 (0x1BFF).
-            fields_updated = 0x1BFF
+            fields_updated = self.HIL_SENSOR_FIELDS_ACCEL | self.HIL_SENSOR_FIELDS_GYRO
 
         # PX4 expects specific units:
         # Accel: m/s^2
