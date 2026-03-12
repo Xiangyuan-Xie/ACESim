@@ -1,4 +1,5 @@
 import platform
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence
 
@@ -30,6 +31,19 @@ class MultirotorEnv(GenesisEnv):
     MAG_RATE_HZ = 100.0
     BARO_RATE_HZ = 50.0
     GPS_RATE_HZ = 30.0
+    GROUND_Z_M = 0.0
+    GROUND_EFFECT_MIN_HEIGHT_M = 0.03
+    GROUND_EFFECT_FADE_HEIGHT_M = 0.8
+    GROUND_EFFECT_MAX_GAIN = 1.35
+    DOWNWASH_FORCE_COEFF = 0.22
+    DOWNWASH_VERTICAL_DECAY_M = 0.45
+    DOWNWASH_LATERAL_DECAY_M = 0.2
+    DOWNWASH_MAX_RADIUS_M = 0.45
+    DOWNWASH_MIN_VERTICAL_SEPARATION_M = 0.02
+    DOWNWASH_CONE_SPREAD_TAN = 0.35
+    DOWNWASH_ENV_FORCE_COEFF = 0.18
+    ENABLE_GROUND_EFFECT = True
+    ENABLE_DOWNWASH = True
 
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
@@ -43,6 +57,7 @@ class MultirotorEnv(GenesisEnv):
         self._desired_rotor_angular_velocity = np.zeros(0)
         self._rotor_angular_velocity = np.zeros(0)
         self._rotor_direction = np.zeros(0)
+        self._downwash_target_links: list[Any] = []
         self._arm_dofs_idx_local = None
         self._configure_update_timing()
         self._initialize_sensor_buffers()
@@ -73,6 +88,84 @@ class MultirotorEnv(GenesisEnv):
             self.GPS_LON_START = float(asset_params["gps_lon_start"])
         if "gps_alt_start" in asset_params:
             self.GPS_ALT_START = float(asset_params["gps_alt_start"])
+        if "ground_z_m" in asset_params:
+            self.GROUND_Z_M = float(asset_params["ground_z_m"])
+        if "ground_effect_min_height_m" in asset_params:
+            self.GROUND_EFFECT_MIN_HEIGHT_M = float(asset_params["ground_effect_min_height_m"])
+        if "ground_effect_fade_height_m" in asset_params:
+            self.GROUND_EFFECT_FADE_HEIGHT_M = float(asset_params["ground_effect_fade_height_m"])
+        if "ground_effect_max_gain" in asset_params:
+            self.GROUND_EFFECT_MAX_GAIN = float(asset_params["ground_effect_max_gain"])
+        if "downwash_force_coeff" in asset_params:
+            self.DOWNWASH_FORCE_COEFF = float(asset_params["downwash_force_coeff"])
+        if "downwash_vertical_decay_m" in asset_params:
+            self.DOWNWASH_VERTICAL_DECAY_M = float(asset_params["downwash_vertical_decay_m"])
+        if "downwash_lateral_decay_m" in asset_params:
+            self.DOWNWASH_LATERAL_DECAY_M = float(asset_params["downwash_lateral_decay_m"])
+        if "downwash_max_radius_m" in asset_params:
+            self.DOWNWASH_MAX_RADIUS_M = float(asset_params["downwash_max_radius_m"])
+        if "downwash_min_vertical_separation_m" in asset_params:
+            self.DOWNWASH_MIN_VERTICAL_SEPARATION_M = float(asset_params["downwash_min_vertical_separation_m"])
+        if "downwash_cone_spread_tan" in asset_params:
+            self.DOWNWASH_CONE_SPREAD_TAN = float(asset_params["downwash_cone_spread_tan"])
+        if "downwash_env_force_coeff" in asset_params:
+            self.DOWNWASH_ENV_FORCE_COEFF = float(asset_params["downwash_env_force_coeff"])
+        if "enable_ground_effect" in asset_params:
+            self.ENABLE_GROUND_EFFECT = self._parse_bool(asset_params["enable_ground_effect"], default=True)
+        if "enable_downwash" in asset_params:
+            self.ENABLE_DOWNWASH = self._parse_bool(asset_params["enable_downwash"], default=True)
+
+    @staticmethod
+    def _parse_bool(value: Any, default: bool):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "off"}:
+                return False
+        return default
+
+    def _compute_ground_effect_gain(self, rotor_height_m: float, wash_to_ground_factor: float):
+        if not self.ENABLE_GROUND_EFFECT:
+            return 1.0
+        orientation_scale = float(np.clip(wash_to_ground_factor, 0.0, 1.0))
+        if orientation_scale <= 0.0:
+            return 1.0
+        if rotor_height_m >= self.GROUND_EFFECT_FADE_HEIGHT_M:
+            return 1.0
+        effective_height = max(rotor_height_m, self.GROUND_EFFECT_MIN_HEIGHT_M)
+        ratio = self._params.rotor_radius / (4.0 * effective_height)
+        ratio_sq = np.clip(ratio * ratio, 0.0, 0.95)
+        ideal_gain = 1.0 / (1.0 - ratio_sq)
+        fade = 1.0 - np.clip(rotor_height_m / self.GROUND_EFFECT_FADE_HEIGHT_M, 0.0, 1.0)
+        gain = 1.0 + (ideal_gain - 1.0) * fade
+        clipped_gain = float(np.clip(gain, 1.0, self.GROUND_EFFECT_MAX_GAIN))
+        return 1.0 + (clipped_gain - 1.0) * orientation_scale
+
+    def _compute_downwash_force_w(
+        self, rotor_index: int, rotor_positions_w: np.ndarray, rotor_thrusts: np.ndarray, downwash_dir_w: np.ndarray
+    ):
+        if not self.ENABLE_DOWNWASH:
+            return np.zeros(3)
+        downwash_force = 0.0
+        for j in range(self._rotor_count):
+            if j == rotor_index:
+                continue
+            rel_w = rotor_positions_w[rotor_index] - rotor_positions_w[j]
+            axial_sep = float(np.dot(rel_w, downwash_dir_w))
+            if axial_sep <= self.DOWNWASH_MIN_VERTICAL_SEPARATION_M:
+                continue
+            lateral_sep = float(np.linalg.norm(rel_w - axial_sep * downwash_dir_w))
+            if lateral_sep >= self.DOWNWASH_MAX_RADIUS_M:
+                continue
+            lateral_decay = np.exp(-lateral_sep / max(self.DOWNWASH_LATERAL_DECAY_M, 1e-6))
+            vertical_decay = np.exp(-axial_sep / max(self.DOWNWASH_VERTICAL_DECAY_M, 1e-6))
+            downwash_force += self.DOWNWASH_FORCE_COEFF * rotor_thrusts[j] * lateral_decay * vertical_decay
+        return downwash_dir_w * downwash_force
 
     def _to_numpy(self, value, fallback_dim: Optional[int] = None):
         if value is None:
@@ -245,8 +338,54 @@ class MultirotorEnv(GenesisEnv):
             rotor_pos = self._get_link_pos(link)
             offsets.append(rb_inv.apply(rotor_pos - base_pos))
         self._rotor_offsets = np.array(offsets, dtype=float) if offsets else np.zeros((0, 3))
+        self._initialize_downwash_targets()
         self._runtime_initialized = True
         self._has_prev_vel = False
+
+    def _initialize_downwash_targets(self):
+        if self._robot is None:
+            self._downwash_target_links = []
+            return
+        link_names = self._load_body_names_from_merged_xml()
+        excluded_indices = set()
+        if self._base_link is not None:
+            base_index = self._get_link_index(self._base_link)
+            if base_index is not None:
+                excluded_indices.add(base_index)
+        for rotor_link in self._rotor_links:
+            rotor_index = self._get_link_index(rotor_link)
+            if rotor_index is not None:
+                excluded_indices.add(rotor_index)
+        target_links = []
+        visited = set()
+        for name in link_names:
+            if name == "base_link" or name.startswith("rotor_"):
+                continue
+            link = self._resolve_link(name)
+            if link is None:
+                continue
+            link_index = self._get_link_index(link)
+            if link_index is None or link_index in excluded_indices or link_index in visited:
+                continue
+            visited.add(link_index)
+            target_links.append(link)
+        self._downwash_target_links = target_links
+
+    def _load_body_names_from_merged_xml(self):
+        merged_xml_path = getattr(self, "_merged_xml_path", None)
+        if merged_xml_path is None:
+            return []
+        try:
+            root = ET.parse(merged_xml_path).getroot()
+        except Exception:
+            return []
+        names = []
+        for elem in root.iter("body"):
+            name = elem.get("name")
+            if not name:
+                continue
+            names.append(name)
+        return names
 
     def _ensure_runtime_ready(self):
         self._ensure_scene()
@@ -431,21 +570,79 @@ class MultirotorEnv(GenesisEnv):
             except TypeError:
                 continue
 
+    def _apply_downwash_to_environment(
+        self, rotor_positions_w: np.ndarray, rotor_thrusts: np.ndarray, downwash_dir_w: np.ndarray
+    ):
+        if not self.ENABLE_DOWNWASH:
+            return
+        if len(self._downwash_target_links) == 0:
+            return
+        target_forces_w = np.zeros((len(self._downwash_target_links), 3), dtype=float)
+        for link_i, link in enumerate(self._downwash_target_links):
+            body_pos_w = self._get_link_pos(link)
+            total_force_w = np.zeros(3, dtype=float)
+            for rotor_i in range(self._rotor_count):
+                rel_w = body_pos_w - rotor_positions_w[rotor_i]
+                axial_sep = float(np.dot(rel_w, downwash_dir_w))
+                if axial_sep <= self.DOWNWASH_MIN_VERTICAL_SEPARATION_M:
+                    continue
+                cone_radius = self._params.rotor_radius + axial_sep * self.DOWNWASH_CONE_SPREAD_TAN
+                effective_radius = min(self.DOWNWASH_MAX_RADIUS_M, cone_radius)
+                if effective_radius <= 1e-6:
+                    continue
+                lateral_sep = float(np.linalg.norm(rel_w - axial_sep * downwash_dir_w))
+                if lateral_sep >= effective_radius:
+                    continue
+                vertical_decay = np.exp(-axial_sep / max(self.DOWNWASH_VERTICAL_DECAY_M, 1e-6))
+                lateral_decay = np.exp(-((lateral_sep / effective_radius) ** 2))
+                force_mag = self.DOWNWASH_ENV_FORCE_COEFF * rotor_thrusts[rotor_i] * vertical_decay * lateral_decay
+                total_force_w += downwash_dir_w * force_mag
+            target_forces_w[link_i] = total_force_w
+        self._apply_link_forces(self._downwash_target_links, target_forces_w)
+
+    def _compute_rotor_wrenches(
+        self, base_pos: np.ndarray, rb: Rotation, rb_inv: Rotation, v_com_w: np.ndarray, omega_w: np.ndarray
+    ):
+        rotor_positions_w = np.zeros((self._rotor_count, 3), dtype=float)
+        rotor_thrusts = np.zeros(self._rotor_count, dtype=float)
+        rotor_forces_w = np.zeros((self._rotor_count, 3), dtype=float)
+        rotor_torques_w = np.zeros((self._rotor_count, 3), dtype=float)
+        thrust_axis_w = rb.apply(np.array([0.0, 0.0, 1.0], dtype=float))
+        wash_to_ground_factor = float(np.clip(thrust_axis_w[2], 0.0, 1.0))
+        for i in range(self._rotor_count):
+            r_off_w = rb.apply(self._rotor_offsets[i])
+            pos_w = base_pos + r_off_w
+            rotor_positions_w[i] = pos_w
+            v_point_w = v_com_w + np.cross(omega_w, r_off_w)
+            v_point_r = rb_inv.apply(v_point_w)
+            v_planar_r = np.array([v_point_r[0], v_point_r[1], 0.0], dtype=float)
+            omega = self._rotor_angular_velocity[i]
+            direction = self._rotor_direction[i]
+            thrust = self._params.motor_constant * (omega**2)
+            rotor_height_m = max(pos_w[2] - self.GROUND_Z_M, 0.0)
+            thrust *= self._compute_ground_effect_gain(rotor_height_m, wash_to_ground_factor)
+            rotor_thrusts[i] = thrust
+            f_drag_r = -self._params.rotor_drag_coeff * omega * v_planar_r
+            rotor_forces_w[i] = rb.apply(np.array([0.0, 0.0, thrust], dtype=float) + f_drag_r)
+            torque_z_r = self._params.moment_constant * thrust * (-direction)
+            m_rolling_r = -self._params.rolling_moment_coeff * omega * v_planar_r
+            rotor_torques_w[i] = rb.apply(np.array([0.0, 0.0, torque_z_r], dtype=float) + m_rolling_r)
+        return rotor_positions_w, rotor_thrusts, rotor_forces_w, rotor_torques_w, thrust_axis_w
+
     def _apply_motor_physics(self):
         if self._rotor_count == 0:
             return
         self._update_rotor_speed_state()
-        base_pos, rb, _, _ = self._get_base_kinematics()
-        rotor_forces_w = np.zeros((self._rotor_count, 3), dtype=float)
-        rotor_torques_w = np.zeros((self._rotor_count, 3), dtype=float)
+        base_pos, rb, v_com_w, omega_w = self._get_base_kinematics()
+        rb_inv = rb.inv()
+        rotor_positions_w, rotor_thrusts, rotor_forces_w, rotor_torques_w, thrust_axis_w = self._compute_rotor_wrenches(
+            base_pos, rb, rb_inv, v_com_w, omega_w
+        )
+        downwash_dir_w = -thrust_axis_w
         for i in range(self._rotor_count):
-            omega = self._rotor_angular_velocity[i]
-            thrust = self._params.motor_constant * (omega**2)
-            rotor_forces_w[i] = rb.apply(np.array([0.0, 0.0, thrust], dtype=float))
-            torque_z = self._params.moment_constant * thrust * (-self._rotor_direction[i])
-            rotor_torques_w[i] = rb.apply(np.array([0.0, 0.0, torque_z], dtype=float))
-            _ = base_pos + rb.apply(self._rotor_offsets[i])
+            rotor_forces_w[i] += self._compute_downwash_force_w(i, rotor_positions_w, rotor_thrusts, downwash_dir_w)
         self._apply_link_forces(self._rotor_links, rotor_forces_w)
+        self._apply_downwash_to_environment(rotor_positions_w, rotor_thrusts, downwash_dir_w)
         base_torque_w = np.sum(rotor_torques_w, axis=0).reshape(1, 3)
         if self._base_link is not None:
             self._apply_link_torques([self._base_link], base_torque_w)

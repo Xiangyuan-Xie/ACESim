@@ -43,6 +43,8 @@ class MultirotorEnv(MujocoEnv):
     DOWNWASH_MIN_VERTICAL_SEPARATION_M = 0.02
     DOWNWASH_CONE_SPREAD_TAN = 0.35
     DOWNWASH_ENV_FORCE_COEFF = 0.18
+    ENABLE_GROUND_EFFECT = True
+    ENABLE_DOWNWASH = True
 
     # === Initialization ===
     def __init__(self, config_loader: ConfigLoader):
@@ -111,9 +113,32 @@ class MultirotorEnv(MujocoEnv):
             self.DOWNWASH_CONE_SPREAD_TAN = float(asset_params["downwash_cone_spread_tan"])
         if "downwash_env_force_coeff" in asset_params:
             self.DOWNWASH_ENV_FORCE_COEFF = float(asset_params["downwash_env_force_coeff"])
+        if "enable_ground_effect" in asset_params:
+            self.ENABLE_GROUND_EFFECT = self._parse_bool(asset_params["enable_ground_effect"], default=True)
+        if "enable_downwash" in asset_params:
+            self.ENABLE_DOWNWASH = self._parse_bool(asset_params["enable_downwash"], default=True)
+
+    @staticmethod
+    def _parse_bool(value: Any, default: bool):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "off"}:
+                return False
+        return default
 
     # === Aerodynamic Models ===
-    def _compute_ground_effect_gain(self, rotor_height_m: float):
+    def _compute_ground_effect_gain(self, rotor_height_m: float, wash_to_ground_factor: float):
+        if not self.ENABLE_GROUND_EFFECT:
+            return 1.0
+        orientation_scale = float(np.clip(wash_to_ground_factor, 0.0, 1.0))
+        if orientation_scale <= 0.0:
+            return 1.0
         if rotor_height_m >= self.GROUND_EFFECT_FADE_HEIGHT_M:
             return 1.0
         effective_height = max(rotor_height_m, self.GROUND_EFFECT_MIN_HEIGHT_M)
@@ -122,11 +147,14 @@ class MultirotorEnv(MujocoEnv):
         ideal_gain = 1.0 / (1.0 - ratio_sq)
         fade = 1.0 - np.clip(rotor_height_m / self.GROUND_EFFECT_FADE_HEIGHT_M, 0.0, 1.0)
         gain = 1.0 + (ideal_gain - 1.0) * fade
-        return float(np.clip(gain, 1.0, self.GROUND_EFFECT_MAX_GAIN))
+        clipped_gain = float(np.clip(gain, 1.0, self.GROUND_EFFECT_MAX_GAIN))
+        return 1.0 + (clipped_gain - 1.0) * orientation_scale
 
     def _compute_downwash_force_w(
         self, rotor_index: int, rotor_positions_w: np.ndarray, rotor_thrusts: np.ndarray, downwash_dir_w: np.ndarray
     ):
+        if not self.ENABLE_DOWNWASH:
+            return np.zeros(3)
         downwash_force = 0.0
         for j in range(self._rotor_count):
             if j == rotor_index:
@@ -191,6 +219,8 @@ class MultirotorEnv(MujocoEnv):
     def _apply_downwash_to_environment(
         self, rotor_positions_w: np.ndarray, rotor_thrusts: np.ndarray, downwash_dir_w: np.ndarray
     ):
+        if not self.ENABLE_DOWNWASH:
+            return
         if self._downwash_target_body_ids.size == 0:
             return
         for body_id in self._downwash_target_body_ids:
@@ -435,7 +465,13 @@ class MultirotorEnv(MujocoEnv):
         return base_pos, rb, rb_inv, thrust_axis_w, v_com_w, omega_w
 
     def _compute_rotor_wrenches(
-        self, base_pos: np.ndarray, rb: Rotation, rb_inv: Rotation, v_com_w: np.ndarray, omega_w: np.ndarray
+        self,
+        base_pos: np.ndarray,
+        rb: Rotation,
+        rb_inv: Rotation,
+        v_com_w: np.ndarray,
+        omega_w: np.ndarray,
+        wash_to_ground_factor: float,
     ):
         rotor_positions_w = np.zeros((self._rotor_count, 3))
         rotor_thrusts = np.zeros(self._rotor_count)
@@ -452,7 +488,7 @@ class MultirotorEnv(MujocoEnv):
             direction = self._rotor_direction[i]
             thrust = self._params.motor_constant * (omega**2)
             rotor_height_m = max(pos_w[2] - self.GROUND_Z_M, 0.0)
-            thrust *= self._compute_ground_effect_gain(rotor_height_m)
+            thrust *= self._compute_ground_effect_gain(rotor_height_m, wash_to_ground_factor)
             rotor_thrusts[i] = thrust
             torque_z_r = self._params.moment_constant * thrust * (-direction)
             f_drag_r = -self._params.rotor_drag_coeff * omega * v_planar_r
@@ -495,10 +531,11 @@ class MultirotorEnv(MujocoEnv):
         # [2] Base kinematics in world/body frames
         base_pos, rb, rb_inv, thrust_axis_w, v_com_w, omega_w = self._get_base_kinematics()
         downwash_dir_w = -thrust_axis_w
+        wash_to_ground_factor = float(np.clip(thrust_axis_w[2], 0.0, 1.0))
 
         # [3] Rotor thrust/drag/torque aggregation
         rotor_positions_w, rotor_thrusts, rotor_force_w, rotor_moment_w = self._compute_rotor_wrenches(
-            base_pos, rb, rb_inv, v_com_w, omega_w
+            base_pos, rb, rb_inv, v_com_w, omega_w, wash_to_ground_factor
         )
 
         # [4] Apply to vehicle and environment
