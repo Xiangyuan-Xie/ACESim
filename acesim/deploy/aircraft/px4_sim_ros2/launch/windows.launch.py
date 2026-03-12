@@ -46,9 +46,47 @@ def _launch_setup(context):
         cwd=px4_repo_path,
         output="screen",
     )
+    arm_command_joint_state_pub = ExecuteProcess(
+        cmd=[
+            "ros2",
+            "topic",
+            "pub",
+            "--rate",
+            "250",
+            "/arm/command",
+            "sensor_msgs/msg/JointState",
+            (
+                "{name: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5'], "
+                "position: [-1.57, 3.14, 0.0, 0.0, 0.0], "
+                "velocity: [0.0, 0.0, 0.0, 0.0, 0.0], "
+                "effort: [0.0, 0.0, 0.0, 0.0, 0.0]}"
+            ),
+        ],
+        # output="screen",
+    )
+    arm_state_joint_state_pub = ExecuteProcess(
+        cmd=[
+            "ros2",
+            "topic",
+            "pub",
+            "--rate",
+            "250",
+            "/arm/state",
+            "sensor_msgs/msg/JointState",
+            (
+                "{name: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5'], "
+                "position: [-1.57, 3.14, 0.0, 0.0, 0.0], "
+                "velocity: [0.0, 0.0, 0.0, 0.0, 0.0], "
+                "effort: [0.0, 0.0, 0.0, 0.0, 0.0]}"
+            ),
+        ],
+        # output="screen",
+    )
     return [
         micro_xrce_agent,
         px4_sitl,
+        arm_command_joint_state_pub,
+        arm_state_joint_state_pub,
     ]
 
 
