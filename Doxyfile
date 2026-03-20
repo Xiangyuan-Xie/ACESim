@@ -1,0 +1,36 @@
+# Doxygen Project configuration file for ACESim
+
+# Project related configuration options
+PROJECT_NAME           = "ACESim"
+PROJECT_BRIEF          = "A simulation toolset for PX4 + MuJoCo"
+OUTPUT_DIRECTORY       = docs/doxygen
+
+# Input and output files
+INPUT                  = acesim README.md
+USE_MDFILE_AS_MAINPAGE = README.md
+RECURSIVE              = YES
+FILE_PATTERNS          = *.py *.md
+
+# Language and optimization
+OPTIMIZE_OUTPUT_JAVA   = YES # This setting enables standard Java/Python optimization in Doxygen
+PYTHON_DOCSTRING       = YES
+
+# Extraction configuration
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+
+# Generated formats
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+
+# Exclude unnecessary directories
+EXCLUDE_PATTERNS       = */__pycache__/* \
+                         */.pytest_cache/* \
+                         */.venv/* \
+                         */venv/* \
+                         */acesim.egg-info/* \
+                         */build/* \
+                         */dist/* \
+                         */.git/*
