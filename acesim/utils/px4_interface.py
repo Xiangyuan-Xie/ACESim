@@ -91,7 +91,8 @@ class PX4Interface:
         # ABS_PRESSURE(512) | DIFF_PRESSURE(1024) | PRESSURE_ALT(2048) | TEMPERATURE(4096).
 
         if fields_updated is None:
-            fields_updated = self.HIL_SENSOR_FIELDS_ACCEL | self.HIL_SENSOR_FIELDS_GYRO
+            # Default: everything except DIFF_PRESSURE (1024).
+            fields_updated = 0x1BFF
 
         # PX4 expects specific units:
         # Accel: m/s^2

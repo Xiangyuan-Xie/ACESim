@@ -47,7 +47,7 @@ def _launch_setup(context):
         output="screen",
     )
     mujoco_sim = ExecuteProcess(
-        cmd=["python3", "-m", "acesim.fly"],
+        cmd=["python3", "-m", "acesim.core.play"],
         output="screen",
     )
     return [

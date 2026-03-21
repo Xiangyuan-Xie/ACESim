@@ -362,28 +362,13 @@ class MultirotorEnv(MujocoEnv):
 
     # === PX4 HIL Bridge ===
     def _update_sensors_and_send(self):
-        # [1] Update task timers
-        dt = self._mj_model.opt.timestep
         self._hil_sensor_sent = False
-        self._mag_elapsed_s += dt
-        self._baro_elapsed_s += dt
-        self._hil_sensor_elapsed_s += dt
-
-        hil_sensor_fields = self._px4_interface.HIL_SENSOR_FIELDS_ACCEL | self._px4_interface.HIL_SENSOR_FIELDS_GYRO
-
-        # [2] Refresh low-rate sensor caches
-        if self._mag_elapsed_s >= self._mag_period_s:
+        if self._step_count % 10 == 0:
             self._last_mag_frd = self._get_mag_with_noise()
-            self._mag_elapsed_s -= self._mag_period_s
-            hil_sensor_fields |= self._px4_interface.HIL_SENSOR_FIELDS_MAG
-        if self._baro_elapsed_s >= self._baro_period_s:
+        if self._step_count % 20 == 0:
             position_sensor = self._get_sensor_raw("pos")
             self._last_baro_altitude_m = position_sensor[2] + self.GPS_ALT_START + np.random.normal(0, 0.25)
-            self._baro_elapsed_s -= self._baro_period_s
-            hil_sensor_fields |= self._px4_interface.HIL_SENSOR_FIELDS_BARO
-
-        # [3] Send HIL_SENSOR at fixed rate
-        if self._hil_sensor_elapsed_s >= self._hil_sensor_period_s:
+        if self._step_count % 4 == 0:
             self._last_accel_frd = self._get_accel_with_noise()
             self._last_gyro_frd = self._get_gyro_with_noise()
             self._px4_interface.send_hil_sensor(
@@ -392,14 +377,11 @@ class MultirotorEnv(MujocoEnv):
                 self._last_gyro_frd,
                 self._last_mag_frd,
                 self._last_baro_altitude_m,
-                fields_updated=hil_sensor_fields,
             )
-            self._hil_sensor_elapsed_s -= self._hil_sensor_period_s
             self._hil_sensor_sent = True
 
     def _update_gps_and_send(self):
-        self._gps_elapsed_s += self._mj_model.opt.timestep
-        if self._gps_elapsed_s >= self._gps_period_s:
+        if self._step_count % 20 == 0:
             lat_e7, lon_e7, alt_mm = self._get_gps_pos_with_noise()
             vel_cm_s, vn_cm_s, ve_cm_s, vd_cm_s, cog_cdeg = self._get_gps_vel_with_noise()
             self._px4_interface.send_hil_gps(
@@ -413,12 +395,10 @@ class MultirotorEnv(MujocoEnv):
                 vd_cm_s,
                 cog_cdeg,
             )
-            self._gps_elapsed_s -= self._gps_period_s
 
     def _update_px4_controls(self):
-        if self._hil_sensor_sent:
-            wait_timeout_s = self._hil_sensor_period_s * 2.0
-            controls = self._px4_interface.read_actuator_controls(blocking=True, timeout_s=wait_timeout_s)
+        if self._step_count % 4 == 0:
+            controls = self._px4_interface.read_actuator_controls()
             if controls:
                 count = min(len(controls), self._rotor_count)
                 desired = np.zeros(self._rotor_count)
