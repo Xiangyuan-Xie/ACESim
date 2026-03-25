@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>px4_sim_ros2</name>
+  <name>acesim_ros2</name>
   <version>0.0.1</version>
   <description>ROS 2 utilities for PX4 HIL simulation in ACETele</description>
   <maintainer email="dragonboat_xxy@163.com">Xiangyuan Xie</maintainer>
@@ -8,6 +8,9 @@
 
   <depend>rclpy</depend>
   <depend>rosgraph_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
   <exec_depend>python3-zmq</exec_depend>
 
   <export>

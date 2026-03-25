@@ -367,4 +367,3 @@ class MultirotorEnv(MujocoEnv):
         """Release PX4 resources and then delegate base-backend cleanup."""
 
         self._px4_interface.close()
-        super().close()

@@ -6,6 +6,7 @@ from typing import Optional
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def _detect_acesim_root() -> Path:
@@ -65,30 +66,21 @@ def _launch_setup(context):
         ],
         # output="screen",
     )
-    arm_state_joint_state_pub = ExecuteProcess(
-        cmd=[
-            "ros2",
-            "topic",
-            "pub",
-            "--rate",
-            "250",
-            "/arm/state",
-            "sensor_msgs/msg/JointState",
-            (
-                "{name: ['joint1', 'joint2', 'joint3', 'joint4', 'joint5'], "
-                "position: [-1.57, 3.14, 0.0, 0.0, 0.0], "
-                "velocity: [0.0, 0.0, 0.0, 0.0, 0.0], "
-                "effort: [0.0, 0.0, 0.0, 0.0, 0.0]}"
-            ),
-        ],
-        # output="screen",
-    )
-    clock_bridge = ExecuteProcess(
-        cmd=["ros2", "run", "px4_sim_ros2", "clock_zmq_bridge", "--mode", "linux"],
+    clock_bridge = Node(
+        package="acesim_ros2",
+        executable="simulation_clock_zmq_bridge",
+        arguments=["--mode", "linux"],
         output="screen",
     )
-    mujoco_sim = ExecuteProcess(
-        cmd=["python3", "-m", "acesim.core.play"],
+    arm_state_bridge = Node(
+        package="acesim_ros2",
+        executable="arm_state_zmq_bridge",
+        arguments=["--mode", "linux"],
+        output="screen",
+    )
+    acesim_play = Node(
+        package="acesim_ros2",
+        executable="acesim_play",
         output="screen",
     )
 
@@ -96,9 +88,9 @@ def _launch_setup(context):
         micro_xrce_agent,
         px4_sitl,
         arm_command_joint_state_pub,
-        arm_state_joint_state_pub,
         clock_bridge,
-        mujoco_sim,
+        arm_state_bridge,
+        acesim_play,
     ]
 
 

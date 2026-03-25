@@ -101,10 +101,10 @@ python -m acesim.core.play
 
 ## ROS 2 集成与部署
 
-`acesim/deploy/aircraft/px4_sim_ros2` 包含 PX4 SITL 与 Micro XRCE DDS Agent 的启动脚本：
+`acesim/deploy/aircraft/acesim_ros2` 包含 PX4 SITL 与 Micro XRCE DDS Agent 的启动脚本：
 
 ```bash
-ros2 launch px4_sim_ros2 linux.launch.py
+ros2 launch acesim_ros2 linux.launch.py
 ```
 
 若无法自动定位仓库路径，可设置 `ACETELE_ROOT` 指向本仓库根目录，或通过启动参数指定 `px4_repo`。

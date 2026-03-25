@@ -9,7 +9,7 @@ import numpy as np
 
 from acesim.utils.frame import world_nwu_to_ned
 from acesim.utils.px4_interface import PX4Interface, PX4SensorParams
-from acesim.utils.sim_clock import SimulationClock
+from acesim.utils.simulation_clock_manager import SimulationClockManager
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class PX4SensorBridge:
     def __init__(
         self,
         px4_interface: PX4Interface,
-        clock: SimulationClock,
+        clock: SimulationClockManager,
         params: PX4SensorParams,
         read_sensor_sample: Callable[[], PX4SensorSample],
         reset_sensor_state: Callable[[], None] | None = None,

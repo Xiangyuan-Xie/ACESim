@@ -3,7 +3,7 @@ from glob import glob
 
 from setuptools import find_packages, setup
 
-package_name = "px4_sim_ros2"
+package_name = "acesim_ros2"
 
 setup(
     name=package_name,
@@ -23,7 +23,9 @@ setup(
     zip_safe=True,
     entry_points={
         "console_scripts": [
-            "clock_zmq_bridge = px4_sim_ros2.clock_zmq_bridge:main",
+            "acesim_play = acesim_ros2.acesim_play:main",
+            "simulation_clock_zmq_bridge = acesim_ros2.simulation_clock_zmq_bridge:main",
+            "arm_state_zmq_bridge = acesim_ros2.arm_state_zmq_bridge:main",
         ],
     },
 )

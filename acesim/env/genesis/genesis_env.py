@@ -9,7 +9,7 @@ import genesis as gs
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.base_env import BaseEnv
-from acesim.utils.sim_clock import SimulationClock
+from acesim.utils.simulation_clock_manager import SimulationClockManager
 
 
 class GenesisEnv(BaseEnv):
@@ -38,7 +38,7 @@ class GenesisEnv(BaseEnv):
         self._merged_xml_file.close()
         self._merged_xml_path = Path(self._merged_xml_file.name).resolve()
 
-        self._sim_clock = SimulationClock()
+        self._sim_clock = SimulationClockManager()
         self._step_count = 0
         self._dt_s = 0.002
         self._scene = None

@@ -1,6 +1,7 @@
 """MuJoCo multirotor environment extended with the manipulator control stack."""
 
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 
 import mujoco
@@ -8,6 +9,16 @@ from acetele.core.make_robot import make_robot
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.multirotor_env import MultirotorEnv
+from acesim.utils.arm_state_manager import ArmStateManager
+from acesim.utils.servo_bridge import ServoBridge, ServoControlSample, ServoStateSample
+
+
+@dataclass
+class MCArmParams:
+    """Timing parameters that affect the manipulator control loop."""
+
+    arm_control_rate_hz: float
+    arm_state_publish_rate_hz: float
 
 
 class MCArmEnv(MultirotorEnv):
@@ -15,13 +26,13 @@ class MCArmEnv(MultirotorEnv):
 
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
+        asset_params = config_loader.get_asset_params()
+        config = asset_params.get("mc_arm", asset_params)
+        self._arm_params = MCArmParams(
+            arm_control_rate_hz=float(config.get("arm_control_rate_hz", 50.0)),
+            arm_state_publish_rate_hz=float(config.get("arm_state_publish_rate_hz", 250.0)),
+        )
         self._robot = make_robot()
-        self._initialize_arm_handles()
-        self._reset_to_home()
-
-    def _initialize_arm_handles(self):
-        """Resolve MuJoCo actuators that correspond to the arm joints."""
-
         self._arm_joint_names = [
             "joint_1",
             "joint_2",
@@ -34,6 +45,22 @@ class MCArmEnv(MultirotorEnv):
         self._arm_actuator_ids = [
             mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_ACTUATOR, name) for name in self._arm_joint_names
         ]
+        self._arm_ros_joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5"]
+        self._arm_joint_ids = [
+            mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_JOINT, name) for name in self._arm_joint_names
+        ]
+        self._arm_state_manager = ArmStateManager()
+        self._servo_bridge = ServoBridge(
+            clock=self._sim_clock,
+            manager=self._arm_state_manager,
+            control_rate_hz=self._arm_params.arm_control_rate_hz,
+            state_publish_rate_hz=self._arm_params.arm_state_publish_rate_hz,
+            read_control_target=self._read_arm_control_target,
+            apply_control=self._apply_arm_control,
+            read_state=self._read_arm_joint_state,
+        )
+        self._reset_to_home()
+        self._servo_bridge.reset()
 
     def _resolve_home_keyframe(self):
         """Return the preferred home keyframe, favoring scene-specific overrides."""
@@ -103,22 +130,47 @@ class MCArmEnv(MultirotorEnv):
         home_pose = self._sync_arm_ctrl_to_current_qpos()
         print(f"Loading '{key_name}' keyframe: [{', '.join([f'{v:.3f}' for v in home_pose])}]")
 
-    def _update_arm_control(self):
-        """Drive the manipulator at 50 Hz while the vehicle loop runs at 250 Hz."""
+    def _read_arm_control_target(self) -> ServoControlSample | None:
+        """Read the next arm control target from the robot controller."""
 
-        if self._step_count % 5 == 0:
-            joint_pos, _, _ = self._robot.act()
-            for i, act_id in enumerate(self._arm_actuator_ids):
-                if act_id >= 0 and i < len(joint_pos):
-                    self._mj_data.ctrl[act_id] = joint_pos[i]
+        joint_pos, _, _ = self._robot.act()
+        return ServoControlSample(joint_positions=joint_pos)
+
+    def _apply_arm_control(self, control_sample: ServoControlSample) -> None:
+        """Apply one scheduled arm control sample to MuJoCo actuators."""
+
+        for i, act_id in enumerate(self._arm_actuator_ids):
+            if act_id >= 0 and i < len(control_sample.joint_positions):
+                self._mj_data.ctrl[act_id] = control_sample.joint_positions[i]
+
+    def _read_arm_joint_state(self) -> ServoStateSample:
+        """Return the current MuJoCo arm state for the five exported joints."""
+
+        positions: list[float] = []
+        velocities: list[float] = []
+        efforts: list[float] = []
+        for joint_id in self._arm_joint_ids[: len(self._arm_ros_joint_names)]:
+            if joint_id < 0:
+                positions.append(0.0)
+                velocities.append(0.0)
+                efforts.append(0.0)
+                continue
+
+            qpos_adr = self._mj_model.jnt_qposadr[joint_id]
+            qvel_adr = self._mj_model.jnt_dofadr[joint_id]
+            positions.append(float(self._mj_data.qpos[qpos_adr]))
+            velocities.append(float(self._mj_data.qvel[qvel_adr]))
+            efforts.append(float(self._mj_data.qfrc_actuator[qvel_adr]))
+
+        return ServoStateSample(positions=positions, velocities=velocities, efforts=efforts)
 
     def _update_custom_control(self):
         """Extend the multirotor control hook with manipulator actuation."""
 
-        self._update_arm_control()  # arm: 50Hz
+        self._servo_bridge.update()
 
     def close(self):
         """Release the arm agent before delegating backend cleanup."""
 
         self._robot.close()
-        super().close()
+        self._arm_state_manager.close()

@@ -1,26 +1,14 @@
 from __future__ import annotations
 
-"""Shared simulation clock with optional ZeroMQ publication.
-
-The clock is the single source of truth for simulated time used by both
-backends and the PX4 bridge. When ZeroMQ is available it also publishes the
-current timestamp for external consumers, but publication failures should never
-block the simulation loop.
-"""
+"""Shared simulation clock manager with ZeroMQ publication."""
 
 import struct
 
-try:
-    import zmq
-
-    _ZMQ_AVAILABLE = True
-except ImportError:
-    zmq = None
-    _ZMQ_AVAILABLE = False
+import zmq
 
 
-class SimulationClock:
-    """Manage simulation time and optionally publish it over ZeroMQ."""
+class SimulationClockManager:
+    """Manage simulation time and publish it over ZeroMQ when enabled."""
 
     def __init__(
         self,
@@ -28,18 +16,12 @@ class SimulationClock:
         zmq_endpoint: str = "tcp://0.0.0.0:5600",
         enable_zmq: bool = True,
     ) -> None:
-        """Create a simulation clock and optionally bind a PUB socket."""
-
         self._current_time_us = max(0, int(start_time_us))
         self._enabled = False
         self._endpoint = zmq_endpoint
         self._socket = None
 
         if not enable_zmq:
-            return
-
-        if not _ZMQ_AVAILABLE:
-            print("[ACESim] ZMQ clock publisher disabled: pyzmq not available.")
             return
 
         try:
@@ -55,7 +37,7 @@ class SimulationClock:
             self._socket = socket
             self._enabled = True
         except zmq.ZMQError as exc:
-            print(f"[ACESim] ZMQ clock publisher disabled: {exc}")
+            print(f"[ACESim] ZMQ simulation clock manager disabled: {exc}")
             self._socket = None
 
     @property
@@ -96,10 +78,9 @@ class SimulationClock:
         try:
             self._socket.send(payload, flags=zmq.NOBLOCK)
         except zmq.Again:
-            # Drop if receiver queue is full; keep sim loop real-time.
             pass
         except zmq.ZMQError as exc:
-            print(f"[ACESim] ZMQ clock publish failed: {exc}")
+            print(f"[ACESim] ZMQ simulation clock manager publish failed: {exc}")
 
     def close(self) -> None:
         """Close the PUB socket and disable future publication attempts."""
