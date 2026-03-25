@@ -37,6 +37,7 @@ def _load_px4_repo_path(override: Optional[str]) -> str:
 def _launch_setup(context):
     override = LaunchConfiguration("px4_repo").perform(context)
     px4_repo_path = _load_px4_repo_path(override)
+
     micro_xrce_agent = ExecuteProcess(
         cmd=["MicroXRCEAgent", "udp4", "-p", "8888"],
         output="screen",
@@ -82,11 +83,17 @@ def _launch_setup(context):
         ],
         # output="screen",
     )
+    clock_bridge = ExecuteProcess(
+        cmd=["ros2", "run", "px4_sim_ros2", "clock_zmq_bridge", "--mode", "wsl"],
+        output="screen",
+    )
+
     return [
         micro_xrce_agent,
         px4_sitl,
         arm_command_joint_state_pub,
         arm_state_joint_state_pub,
+        clock_bridge,
     ]
 
 

@@ -1,7 +1,8 @@
+"""Genesis multirotor environment with PX4 HIL integration."""
+
 import platform
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import genesis as gs
 import numpy as np
@@ -9,46 +10,63 @@ from scipy.spatial.transform import Rotation
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.genesis.genesis_env import GenesisEnv
-from acesim.utils.px4_interface import PX4Interface
+from acesim.utils.frame import body_flu_to_frd
+from acesim.utils.px4_interface import PX4ActuatorParams, PX4Interface, PX4SensorParams
+from acesim.utils.px4_sensor_bridge import PX4SensorBridge, PX4SensorSample
 
 
 @dataclass
 class MultirotorParams:
+    """Rotor and aerodynamic parameters that directly affect vehicle dynamics."""
+
     rotor_direction: np.ndarray
     motor_constant: float
     moment_constant: float
     rotor_drag_coeff: float
     rolling_moment_coeff: float
     rotor_radius: float
+    time_constant_up: float
+    time_constant_down: float
+    max_rot_velocity: float
 
 
 class MultirotorEnv(GenesisEnv):
-    IDLE_VISUAL_SPEED = 55.0
-    GPS_LAT_START = 39.98329
-    GPS_LON_START = 116.34745
-    GPS_ALT_START = 50.0
-    HIL_SENSOR_RATE_HZ = 250.0
-    MAG_RATE_HZ = 100.0
-    BARO_RATE_HZ = 50.0
-    GPS_RATE_HZ = 30.0
-    GROUND_Z_M = 0.0
-    GROUND_EFFECT_MIN_HEIGHT_M = 0.03
-    GROUND_EFFECT_FADE_HEIGHT_M = 0.8
-    GROUND_EFFECT_MAX_GAIN = 1.35
-    DOWNWASH_FORCE_COEFF = 0.22
-    DOWNWASH_VERTICAL_DECAY_M = 0.45
-    DOWNWASH_LATERAL_DECAY_M = 0.2
-    DOWNWASH_MAX_RADIUS_M = 0.45
-    DOWNWASH_MIN_VERTICAL_SEPARATION_M = 0.02
-    DOWNWASH_CONE_SPREAD_TAN = 0.35
-    DOWNWASH_ENV_FORCE_COEFF = 0.18
-    ENABLE_GROUND_EFFECT = True
-    ENABLE_DOWNWASH = True
+    """Genesis multirotor backend with lazy runtime setup and PX4 HIL wiring."""
 
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
-        self._px4_interface = PX4Interface()
-        self._apply_multirotor_overrides(config_loader.get_asset_params())
+        asset_params = config_loader.get_asset_params()
+        config = asset_params.get("multirotor", asset_params)
+        self._params = MultirotorParams(
+            rotor_direction=np.array(config["rotor_direction"], dtype=float),
+            motor_constant=float(config["motor_constant"]),
+            moment_constant=float(config["moment_constant"]),
+            rotor_drag_coeff=float(config["rotor_drag_coeff"]),
+            rolling_moment_coeff=float(config["rolling_moment_coeff"]),
+            rotor_radius=float(config["rotor_radius"]),
+            time_constant_up=float(config.get("time_constant_up", 0.0125)),
+            time_constant_down=float(config.get("time_constant_down", 0.025)),
+            max_rot_velocity=float(config.get("max_rot_velocity", 1000.0)),
+        )
+        self._px4_sensor_params = PX4SensorParams(
+            idle_visual_speed=float(asset_params.get("idle_visual_speed", 55.0)),
+            gps_home_lat_lon=(
+                float(asset_params.get("gps_lat_start", 39.98329)),
+                float(asset_params.get("gps_lon_start", 116.34745)),
+            ),
+            gps_alt_start=float(asset_params.get("gps_alt_start", 50.0)),
+            hil_sensor_rate_hz=float(asset_params.get("hil_sensor_rate_hz", 250.0)),
+            mag_rate_hz=float(asset_params.get("mag_rate_hz", 100.0)),
+            baro_rate_hz=float(asset_params.get("baro_rate_hz", 50.0)),
+            gps_rate_hz=float(asset_params.get("gps_rate_hz", 30.0)),
+            dynamic_hil_sensor_fields=True,
+        )
+        self._px4_actuator_params = PX4ActuatorParams.zero_disturbance(
+            motor_cmd_rate_hz=self._px4_sensor_params.hil_sensor_rate_hz
+        )
+
+        self._px4_interface = None
+        self._sensor_bridge = None
         self._runtime_initialized = False
         self._base_link = None
         self._rotor_links: list[Any] = []
@@ -57,117 +75,17 @@ class MultirotorEnv(GenesisEnv):
         self._desired_rotor_angular_velocity = np.zeros(0)
         self._rotor_angular_velocity = np.zeros(0)
         self._rotor_direction = np.zeros(0)
-        self._downwash_target_links: list[Any] = []
         self._arm_dofs_idx_local = None
-        self._configure_update_timing()
-        self._initialize_sensor_buffers()
+        self._prev_base_linvel_w = np.zeros(3, dtype=float)
+        self._has_prev_vel = False
         if platform.system() == "Windows":
             print("[ACESim] Genesis backend initialized on Windows.")
         else:
             print("[ACESim] Genesis backend initialized on Linux.")
 
-    def _load_multirotor_params(self, asset_config: Dict[str, Any]):
-        config = asset_config.get("multirotor", asset_config)
-        rotor_direction = np.array(config["rotor_direction"], dtype=float)
-        return MultirotorParams(
-            rotor_direction=rotor_direction,
-            motor_constant=float(config["motor_constant"]),
-            moment_constant=float(config["moment_constant"]),
-            rotor_drag_coeff=float(config["rotor_drag_coeff"]),
-            rolling_moment_coeff=float(config["rolling_moment_coeff"]),
-            rotor_radius=float(config["rotor_radius"]),
-        )
-
-    def _apply_multirotor_overrides(self, asset_params: Dict[str, Any]):
-        self._params = self._load_multirotor_params(asset_params)
-        if "idle_visual_speed" in asset_params:
-            self.IDLE_VISUAL_SPEED = float(asset_params["idle_visual_speed"])
-        if "gps_lat_start" in asset_params:
-            self.GPS_LAT_START = float(asset_params["gps_lat_start"])
-        if "gps_lon_start" in asset_params:
-            self.GPS_LON_START = float(asset_params["gps_lon_start"])
-        if "gps_alt_start" in asset_params:
-            self.GPS_ALT_START = float(asset_params["gps_alt_start"])
-        if "ground_z_m" in asset_params:
-            self.GROUND_Z_M = float(asset_params["ground_z_m"])
-        if "ground_effect_min_height_m" in asset_params:
-            self.GROUND_EFFECT_MIN_HEIGHT_M = float(asset_params["ground_effect_min_height_m"])
-        if "ground_effect_fade_height_m" in asset_params:
-            self.GROUND_EFFECT_FADE_HEIGHT_M = float(asset_params["ground_effect_fade_height_m"])
-        if "ground_effect_max_gain" in asset_params:
-            self.GROUND_EFFECT_MAX_GAIN = float(asset_params["ground_effect_max_gain"])
-        if "downwash_force_coeff" in asset_params:
-            self.DOWNWASH_FORCE_COEFF = float(asset_params["downwash_force_coeff"])
-        if "downwash_vertical_decay_m" in asset_params:
-            self.DOWNWASH_VERTICAL_DECAY_M = float(asset_params["downwash_vertical_decay_m"])
-        if "downwash_lateral_decay_m" in asset_params:
-            self.DOWNWASH_LATERAL_DECAY_M = float(asset_params["downwash_lateral_decay_m"])
-        if "downwash_max_radius_m" in asset_params:
-            self.DOWNWASH_MAX_RADIUS_M = float(asset_params["downwash_max_radius_m"])
-        if "downwash_min_vertical_separation_m" in asset_params:
-            self.DOWNWASH_MIN_VERTICAL_SEPARATION_M = float(asset_params["downwash_min_vertical_separation_m"])
-        if "downwash_cone_spread_tan" in asset_params:
-            self.DOWNWASH_CONE_SPREAD_TAN = float(asset_params["downwash_cone_spread_tan"])
-        if "downwash_env_force_coeff" in asset_params:
-            self.DOWNWASH_ENV_FORCE_COEFF = float(asset_params["downwash_env_force_coeff"])
-        if "enable_ground_effect" in asset_params:
-            self.ENABLE_GROUND_EFFECT = self._parse_bool(asset_params["enable_ground_effect"], default=True)
-        if "enable_downwash" in asset_params:
-            self.ENABLE_DOWNWASH = self._parse_bool(asset_params["enable_downwash"], default=True)
-
-    @staticmethod
-    def _parse_bool(value: Any, default: bool):
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"true", "1", "yes", "on"}:
-                return True
-            if normalized in {"false", "0", "no", "off"}:
-                return False
-        return default
-
-    def _compute_ground_effect_gain(self, rotor_height_m: float, wash_to_ground_factor: float):
-        if not self.ENABLE_GROUND_EFFECT:
-            return 1.0
-        orientation_scale = float(np.clip(wash_to_ground_factor, 0.0, 1.0))
-        if orientation_scale <= 0.0:
-            return 1.0
-        if rotor_height_m >= self.GROUND_EFFECT_FADE_HEIGHT_M:
-            return 1.0
-        effective_height = max(rotor_height_m, self.GROUND_EFFECT_MIN_HEIGHT_M)
-        ratio = self._params.rotor_radius / (4.0 * effective_height)
-        ratio_sq = np.clip(ratio * ratio, 0.0, 0.95)
-        ideal_gain = 1.0 / (1.0 - ratio_sq)
-        fade = 1.0 - np.clip(rotor_height_m / self.GROUND_EFFECT_FADE_HEIGHT_M, 0.0, 1.0)
-        gain = 1.0 + (ideal_gain - 1.0) * fade
-        clipped_gain = float(np.clip(gain, 1.0, self.GROUND_EFFECT_MAX_GAIN))
-        return 1.0 + (clipped_gain - 1.0) * orientation_scale
-
-    def _compute_downwash_force_w(
-        self, rotor_index: int, rotor_positions_w: np.ndarray, rotor_thrusts: np.ndarray, downwash_dir_w: np.ndarray
-    ):
-        if not self.ENABLE_DOWNWASH:
-            return np.zeros(3)
-        downwash_force = 0.0
-        for j in range(self._rotor_count):
-            if j == rotor_index:
-                continue
-            rel_w = rotor_positions_w[rotor_index] - rotor_positions_w[j]
-            axial_sep = float(np.dot(rel_w, downwash_dir_w))
-            if axial_sep <= self.DOWNWASH_MIN_VERTICAL_SEPARATION_M:
-                continue
-            lateral_sep = float(np.linalg.norm(rel_w - axial_sep * downwash_dir_w))
-            if lateral_sep >= self.DOWNWASH_MAX_RADIUS_M:
-                continue
-            lateral_decay = np.exp(-lateral_sep / max(self.DOWNWASH_LATERAL_DECAY_M, 1e-6))
-            vertical_decay = np.exp(-axial_sep / max(self.DOWNWASH_VERTICAL_DECAY_M, 1e-6))
-            downwash_force += self.DOWNWASH_FORCE_COEFF * rotor_thrusts[j] * lateral_decay * vertical_decay
-        return downwash_dir_w * downwash_force
-
     def _to_numpy(self, value, fallback_dim: Optional[int] = None):
+        """Normalize Genesis getter outputs into flat NumPy arrays."""
+
         if value is None:
             if fallback_dim is None:
                 return np.array([], dtype=float)
@@ -180,6 +98,8 @@ class MultirotorEnv(GenesisEnv):
         return array
 
     def _quat_to_rotation(self, quat: np.ndarray):
+        """Convert backend quaternions into SciPy rotations across API variants."""
+
         q = self._to_numpy(quat, fallback_dim=4).reshape(-1)
         if q.size != 4:
             return Rotation.identity()
@@ -190,32 +110,9 @@ class MultirotorEnv(GenesisEnv):
         except ValueError:
             return Rotation.identity()
 
-    def _body_flu_to_frd(self, vec_flu: np.ndarray):
-        return np.array([vec_flu[0], -vec_flu[1], -vec_flu[2]], dtype=float)
-
-    def _world_to_ned(self, vec_world: np.ndarray):
-        return np.array([vec_world[0], -vec_world[1], -vec_world[2]], dtype=float)
-
-    def _configure_update_timing(self):
-        self._hil_sensor_period_s = 1.0 / self.HIL_SENSOR_RATE_HZ
-        self._mag_period_s = 1.0 / self.MAG_RATE_HZ
-        self._baro_period_s = 1.0 / self.BARO_RATE_HZ
-        self._gps_period_s = 1.0 / self.GPS_RATE_HZ
-        self._hil_sensor_elapsed_s = 0.0
-        self._mag_elapsed_s = 0.0
-        self._baro_elapsed_s = 0.0
-        self._gps_elapsed_s = 0.0
-        self._hil_sensor_sent = False
-
-    def _initialize_sensor_buffers(self):
-        self._last_accel_frd = np.zeros(3)
-        self._last_gyro_frd = np.zeros(3)
-        self._last_mag_frd = np.zeros(3)
-        self._last_baro_altitude_m = self.GPS_ALT_START
-        self._prev_base_linvel_w = np.zeros(3)
-        self._has_prev_vel = False
-
     def _resolve_link(self, name: str):
+        """Resolve one Genesis link by name, returning ``None`` if unavailable."""
+
         if self._robot is None:
             return None
         try:
@@ -224,6 +121,8 @@ class MultirotorEnv(GenesisEnv):
             return None
 
     def _resolve_joint_dof_indices(self, joint_names: Sequence[str]):
+        """Resolve local DOF indices for the named Genesis joints."""
+
         if self._robot is None:
             return []
         dofs_idx_local = []
@@ -239,6 +138,8 @@ class MultirotorEnv(GenesisEnv):
         return dofs_idx_local
 
     def _control_dofs_position(self, target: np.ndarray, dofs_idx_local: Sequence[int]):
+        """Drive Genesis DOFs through whichever control signature the backend exposes."""
+
         if self._robot is None or len(dofs_idx_local) == 0:
             return
         command = np.asarray(target, dtype=float)
@@ -258,6 +159,8 @@ class MultirotorEnv(GenesisEnv):
             pass
 
     def _get_link_pos(self, link):
+        """Read one Genesis link position in the simulator world frame."""
+
         if link is None:
             return np.zeros(3)
         getter = getattr(link, "get_pos", None)
@@ -269,6 +172,8 @@ class MultirotorEnv(GenesisEnv):
             return np.zeros(3)
 
     def _get_link_quat(self, link):
+        """Read one Genesis link quaternion, defaulting to identity on failure."""
+
         if link is None:
             return np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
         getter = getattr(link, "get_quat", None)
@@ -280,6 +185,8 @@ class MultirotorEnv(GenesisEnv):
             return np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
 
     def _get_link_vel(self, link):
+        """Read one Genesis link linear velocity in the simulator world frame."""
+
         if link is None:
             return np.zeros(3)
         getter = getattr(link, "get_vel", None)
@@ -291,6 +198,8 @@ class MultirotorEnv(GenesisEnv):
             return np.zeros(3)
 
     def _get_link_ang(self, link):
+        """Read one Genesis link angular velocity in the simulator world frame."""
+
         if link is None:
             return np.zeros(3)
         getter = getattr(link, "get_ang", None)
@@ -314,14 +223,22 @@ class MultirotorEnv(GenesisEnv):
         self._runtime_initialized = False
 
     def _initialize_runtime_handles(self):
+        """Resolve Genesis links and derive rotor offsets once the scene exists."""
+
         self._base_link = self._resolve_link("base_link")
+        if self._base_link is None:
+            raise ValueError("Genesis robot must provide link 'base_link'")
+
         rotor_links = []
         for idx in range(1, 13):
             link = self._resolve_link(f"rotor_{idx}")
             if link is not None:
                 rotor_links.append(link)
+
         self._rotor_links = rotor_links
         self._rotor_count = len(self._rotor_links)
+        if self._rotor_count == 0:
+            raise ValueError("No rotor links found. Expected links named rotor_<i>.")
         self._desired_rotor_angular_velocity = np.zeros(self._rotor_count)
         self._rotor_angular_velocity = np.zeros(self._rotor_count)
         direction = np.asarray(self._params.rotor_direction, dtype=float)
@@ -338,61 +255,31 @@ class MultirotorEnv(GenesisEnv):
             rotor_pos = self._get_link_pos(link)
             offsets.append(rb_inv.apply(rotor_pos - base_pos))
         self._rotor_offsets = np.array(offsets, dtype=float) if offsets else np.zeros((0, 3))
-        self._initialize_downwash_targets()
         self._runtime_initialized = True
-        self._has_prev_vel = False
-
-    def _initialize_downwash_targets(self):
-        if self._robot is None:
-            self._downwash_target_links = []
-            return
-        link_names = self._load_body_names_from_merged_xml()
-        excluded_indices = set()
-        if self._base_link is not None:
-            base_index = self._get_link_index(self._base_link)
-            if base_index is not None:
-                excluded_indices.add(base_index)
-        for rotor_link in self._rotor_links:
-            rotor_index = self._get_link_index(rotor_link)
-            if rotor_index is not None:
-                excluded_indices.add(rotor_index)
-        target_links = []
-        visited = set()
-        for name in link_names:
-            if name == "base_link" or name.startswith("rotor_"):
-                continue
-            link = self._resolve_link(name)
-            if link is None:
-                continue
-            link_index = self._get_link_index(link)
-            if link_index is None or link_index in excluded_indices or link_index in visited:
-                continue
-            visited.add(link_index)
-            target_links.append(link)
-        self._downwash_target_links = target_links
-
-    def _load_body_names_from_merged_xml(self):
-        merged_xml_path = getattr(self, "_merged_xml_path", None)
-        if merged_xml_path is None:
-            return []
-        try:
-            root = ET.parse(merged_xml_path).getroot()
-        except Exception:
-            return []
-        names = []
-        for elem in root.iter("body"):
-            name = elem.get("name")
-            if not name:
-                continue
-            names.append(name)
-        return names
 
     def _ensure_runtime_ready(self):
+        """Create the scene and runtime-only handles on first use."""
+
         self._ensure_scene()
         if not self._runtime_initialized:
             self._initialize_runtime_handles()
 
+    def _ensure_px4_interface(self):
+        """Create PX4 transport objects after the runtime state becomes usable."""
+
+        if self._px4_interface is None:
+            self._px4_interface = PX4Interface(self._px4_actuator_params)
+            self._sensor_bridge = PX4SensorBridge(
+                self._px4_interface,
+                self._sim_clock,
+                self._px4_sensor_params,
+                self.read_sensor_sample,
+                self.reset_sensor_state,
+            )
+
     def _get_base_kinematics(self):
+        """Read base pose, orientation, linear velocity, and angular velocity in world NWU."""
+
         base_pos = self._get_link_pos(self._base_link)
         base_quat = self._get_link_quat(self._base_link)
         rb = self._quat_to_rotation(base_quat)
@@ -400,112 +287,69 @@ class MultirotorEnv(GenesisEnv):
         omega_w = self._get_link_ang(self._base_link)
         return base_pos, rb, v_com_w, omega_w
 
-    def _compute_inertial_observations(self):
+    def reset_sensor_state(self) -> None:
+        """Clear the previous-velocity cache used for finite-difference acceleration."""
+
+        self._prev_base_linvel_w = np.zeros(3, dtype=float)
+        self._has_prev_vel = False
+
+    def read_sensor_sample(self) -> PX4SensorSample:
+        """Synthesize one HIL sensor sample from Genesis runtime kinematics.
+
+        Genesis exposes base-link pose and velocity in the simulator world frame,
+        which is NWU in this codebase. Linear acceleration is estimated from the
+        previous velocity sample because the backend does not provide a direct
+        body-frame accelerometer measurement.
+        """
+
         _, rb, v_com_w, omega_w = self._get_base_kinematics()
         if self._has_prev_vel:
             accel_w = (v_com_w - self._prev_base_linvel_w) / max(self._dt_s, 1e-6)
         else:
-            accel_w = np.zeros(3)
+            accel_w = np.zeros(3, dtype=float)
             self._has_prev_vel = True
         self._prev_base_linvel_w = v_com_w.copy()
+
         gravity_w = np.array([0.0, 0.0, -9.81], dtype=float)
+        # HIL accelerometers report proper acceleration, so gravity is removed
+        # before rotating the sample into the body frame.
         proper_accel_w = accel_w - gravity_w
-        accel_body_flu = rb.inv().apply(proper_accel_w)
-        gyro_body_flu = rb.inv().apply(omega_w)
-        accel_frd = self._body_flu_to_frd(accel_body_flu)
-        gyro_frd = self._body_flu_to_frd(gyro_body_flu)
+        rb_inv = rb.inv()
         mag_field_w = np.array([0.21523, 0.0, -0.42741], dtype=float)
-        mag_body_flu = rb.inv().apply(mag_field_w)
-        mag_frd = self._body_flu_to_frd(mag_body_flu)
-        return accel_frd, gyro_frd, mag_frd
+        return PX4SensorSample(
+            accel_frd=body_flu_to_frd(rb_inv.apply(proper_accel_w)),
+            gyro_frd=body_flu_to_frd(rb_inv.apply(omega_w)),
+            mag_frd=body_flu_to_frd(rb_inv.apply(mag_field_w)),
+            position_world_m=self._get_link_pos(self._base_link),
+            velocity_world_mps=v_com_w,
+        )
 
-    def _update_sensors_and_send(self):
-        dt = self._dt_s
-        self._hil_sensor_sent = False
-        self._mag_elapsed_s += dt
-        self._baro_elapsed_s += dt
-        self._hil_sensor_elapsed_s += dt
-        fields = self._px4_interface.HIL_SENSOR_FIELDS_ACCEL | self._px4_interface.HIL_SENSOR_FIELDS_GYRO
-        accel_frd, gyro_frd, mag_frd = self._compute_inertial_observations()
-        if self._mag_elapsed_s >= self._mag_period_s:
-            self._last_mag_frd = mag_frd + np.random.normal(0, 0.003, size=3)
-            self._mag_elapsed_s -= self._mag_period_s
-            fields |= self._px4_interface.HIL_SENSOR_FIELDS_MAG
-        if self._baro_elapsed_s >= self._baro_period_s:
-            base_pos = self._get_link_pos(self._base_link)
-            self._last_baro_altitude_m = base_pos[2] + self.GPS_ALT_START + np.random.normal(0, 0.25)
-            self._baro_elapsed_s -= self._baro_period_s
-            fields |= self._px4_interface.HIL_SENSOR_FIELDS_BARO
-        if self._hil_sensor_elapsed_s >= self._hil_sensor_period_s:
-            self._last_accel_frd = accel_frd + np.random.normal(0, [0.00637, 0.00637, 0.00686])
-            self._last_gyro_frd = gyro_frd + np.random.normal(0, 0.0008726646, size=3)
-            self._px4_interface.send_hil_sensor(
-                self._simulation_time_us,
-                self._last_accel_frd,
-                self._last_gyro_frd,
-                self._last_mag_frd,
-                self._last_baro_altitude_m,
-                fields_updated=fields,
-            )
-            self._hil_sensor_elapsed_s -= self._hil_sensor_period_s
-            self._hil_sensor_sent = True
+    def _update_px4_controls(self, sensor_sent: bool):
+        """Map released normalized PX4 controls onto rotor speed targets."""
 
-    def _get_gps_pos_with_noise(self):
-        pos = self._get_link_pos(self._base_link)
-        pos_noisy = pos + np.random.normal(0, 0.01, size=3)
-        lat = self.GPS_LAT_START + (pos_noisy[0] / 111319.9)
-        lon = self.GPS_LON_START - (pos_noisy[1] / (111319.9 * np.cos(np.radians(self.GPS_LAT_START))))
-        gps_alt = self.GPS_ALT_START + pos_noisy[2]
-        return int(lat * 1e7), int(lon * 1e7), int(gps_alt * 1000)
-
-    def _get_gps_vel_with_noise(self):
-        vel_w = self._get_link_vel(self._base_link) + np.random.normal(0, 0.1, size=3)
-        vel_ned = self._world_to_ned(vel_w)
-        vn = vel_ned[0] * 100.0
-        ve = vel_ned[1] * 100.0
-        vd = vel_ned[2] * 100.0
-        vel = float(np.linalg.norm([vn, ve, vd]))
-        cog_rad = np.arctan2(ve, vn)
-        cog_deg = (np.degrees(cog_rad) + 360.0) % 360.0
-        return int(vel), int(vn), int(ve), int(vd), int(cog_deg * 100.0)
-
-    def _update_gps_and_send(self):
-        self._gps_elapsed_s += self._dt_s
-        if self._gps_elapsed_s >= self._gps_period_s:
-            lat_e7, lon_e7, alt_mm = self._get_gps_pos_with_noise()
-            vel_cm_s, vn_cm_s, ve_cm_s, vd_cm_s, cog_cdeg = self._get_gps_vel_with_noise()
-            self._px4_interface.send_hil_gps(
-                self._simulation_time_us,
-                lat_e7,
-                lon_e7,
-                alt_mm,
-                vel_cm_s,
-                vn_cm_s,
-                ve_cm_s,
-                vd_cm_s,
-                cog_cdeg,
-            )
-            self._gps_elapsed_s -= self._gps_period_s
-
-    def _update_px4_controls(self):
-        if not self._hil_sensor_sent:
+        if not sensor_sent:
             return
-        wait_timeout_s = self._hil_sensor_period_s * 2.0
-        controls = self._px4_interface.read_actuator_controls(blocking=True, timeout_s=wait_timeout_s)
-        if controls:
-            count = min(len(controls), self._rotor_count)
-            desired = np.zeros(self._rotor_count)
-            desired[:count] = np.array(controls[:count]) * 1000.0
-            self._desired_rotor_angular_velocity = np.clip(desired, 0.0, 1000.0)
+        px4 = self._px4_interface
+        assert px4 is not None
+        px4.update_actuator_commands(self._simulation_time_us, self._rotor_count)
+        controls = px4.read_applied_actuator_controls(self._rotor_count)
+        if controls is None:
+            return
+        desired = np.clip(controls * self._params.max_rot_velocity, 0.0, self._params.max_rot_velocity)
+        self._desired_rotor_angular_velocity = desired
 
     def _update_rotor_speed_state(self):
+        """Advance the first-order motor speed model by one Genesis step."""
+
         dt = self._dt_s
         for i in range(self._rotor_count):
             diff = self._desired_rotor_angular_velocity[i] - self._rotor_angular_velocity[i]
-            tc = 0.0125 if diff > 0 else 0.025
+            tc = self._params.time_constant_up if diff > 0 else self._params.time_constant_down
             self._rotor_angular_velocity[i] += diff * (1.0 - np.exp(-dt / tc))
 
     def _get_link_index(self, link):
+        """Return the best-effort Genesis link index used by force APIs."""
+
         idx_local = getattr(link, "idx_local", None)
         if idx_local is not None:
             return int(idx_local)
@@ -515,6 +359,8 @@ class MultirotorEnv(GenesisEnv):
         return None
 
     def _apply_link_forces(self, links, forces_w: np.ndarray):
+        """Apply world-frame forces using the vectorized API when available."""
+
         if self._robot is None or len(links) == 0:
             return
         indices = [self._get_link_index(link) for link in links]
@@ -543,6 +389,8 @@ class MultirotorEnv(GenesisEnv):
                 continue
 
     def _apply_link_torques(self, links, torques_w: np.ndarray):
+        """Apply world-frame torques using the vectorized API when available."""
+
         if self._robot is None or len(links) == 0:
             return
         indices = [self._get_link_index(link) for link in links]
@@ -570,45 +418,14 @@ class MultirotorEnv(GenesisEnv):
             except TypeError:
                 continue
 
-    def _apply_downwash_to_environment(
-        self, rotor_positions_w: np.ndarray, rotor_thrusts: np.ndarray, downwash_dir_w: np.ndarray
-    ):
-        if not self.ENABLE_DOWNWASH:
-            return
-        if len(self._downwash_target_links) == 0:
-            return
-        target_forces_w = np.zeros((len(self._downwash_target_links), 3), dtype=float)
-        for link_i, link in enumerate(self._downwash_target_links):
-            body_pos_w = self._get_link_pos(link)
-            total_force_w = np.zeros(3, dtype=float)
-            for rotor_i in range(self._rotor_count):
-                rel_w = body_pos_w - rotor_positions_w[rotor_i]
-                axial_sep = float(np.dot(rel_w, downwash_dir_w))
-                if axial_sep <= self.DOWNWASH_MIN_VERTICAL_SEPARATION_M:
-                    continue
-                cone_radius = self._params.rotor_radius + axial_sep * self.DOWNWASH_CONE_SPREAD_TAN
-                effective_radius = min(self.DOWNWASH_MAX_RADIUS_M, cone_radius)
-                if effective_radius <= 1e-6:
-                    continue
-                lateral_sep = float(np.linalg.norm(rel_w - axial_sep * downwash_dir_w))
-                if lateral_sep >= effective_radius:
-                    continue
-                vertical_decay = np.exp(-axial_sep / max(self.DOWNWASH_VERTICAL_DECAY_M, 1e-6))
-                lateral_decay = np.exp(-((lateral_sep / effective_radius) ** 2))
-                force_mag = self.DOWNWASH_ENV_FORCE_COEFF * rotor_thrusts[rotor_i] * vertical_decay * lateral_decay
-                total_force_w += downwash_dir_w * force_mag
-            target_forces_w[link_i] = total_force_w
-        self._apply_link_forces(self._downwash_target_links, target_forces_w)
-
     def _compute_rotor_wrenches(
         self, base_pos: np.ndarray, rb: Rotation, rb_inv: Rotation, v_com_w: np.ndarray, omega_w: np.ndarray
     ):
+        """Compute rotor forces and torques for the current Genesis state."""
+
         rotor_positions_w = np.zeros((self._rotor_count, 3), dtype=float)
-        rotor_thrusts = np.zeros(self._rotor_count, dtype=float)
         rotor_forces_w = np.zeros((self._rotor_count, 3), dtype=float)
         rotor_torques_w = np.zeros((self._rotor_count, 3), dtype=float)
-        thrust_axis_w = rb.apply(np.array([0.0, 0.0, 1.0], dtype=float))
-        wash_to_ground_factor = float(np.clip(thrust_axis_w[2], 0.0, 1.0))
         for i in range(self._rotor_count):
             r_off_w = rb.apply(self._rotor_offsets[i])
             pos_w = base_pos + r_off_w
@@ -618,48 +435,55 @@ class MultirotorEnv(GenesisEnv):
             v_planar_r = np.array([v_point_r[0], v_point_r[1], 0.0], dtype=float)
             omega = self._rotor_angular_velocity[i]
             direction = self._rotor_direction[i]
+
+            # Genesis does not expose the same signed motor model path as the
+            # MuJoCo backend, so the spin direction only enters the torque term.
             thrust = self._params.motor_constant * (omega**2)
-            rotor_height_m = max(pos_w[2] - self.GROUND_Z_M, 0.0)
-            thrust *= self._compute_ground_effect_gain(rotor_height_m, wash_to_ground_factor)
-            rotor_thrusts[i] = thrust
             f_drag_r = -self._params.rotor_drag_coeff * omega * v_planar_r
             rotor_forces_w[i] = rb.apply(np.array([0.0, 0.0, thrust], dtype=float) + f_drag_r)
             torque_z_r = self._params.moment_constant * thrust * (-direction)
             m_rolling_r = -self._params.rolling_moment_coeff * omega * v_planar_r
             rotor_torques_w[i] = rb.apply(np.array([0.0, 0.0, torque_z_r], dtype=float) + m_rolling_r)
-        return rotor_positions_w, rotor_thrusts, rotor_forces_w, rotor_torques_w, thrust_axis_w
+        return rotor_positions_w, rotor_forces_w, rotor_torques_w
 
     def _apply_motor_physics(self):
+        """Update rotor state and apply the resulting aerodynamic wrench."""
+
         if self._rotor_count == 0:
             return
         self._update_rotor_speed_state()
         base_pos, rb, v_com_w, omega_w = self._get_base_kinematics()
         rb_inv = rb.inv()
-        rotor_positions_w, rotor_thrusts, rotor_forces_w, rotor_torques_w, thrust_axis_w = self._compute_rotor_wrenches(
-            base_pos, rb, rb_inv, v_com_w, omega_w
-        )
-        downwash_dir_w = -thrust_axis_w
-        for i in range(self._rotor_count):
-            rotor_forces_w[i] += self._compute_downwash_force_w(i, rotor_positions_w, rotor_thrusts, downwash_dir_w)
+        _, rotor_forces_w, rotor_torques_w = self._compute_rotor_wrenches(base_pos, rb, rb_inv, v_com_w, omega_w)
         self._apply_link_forces(self._rotor_links, rotor_forces_w)
-        self._apply_downwash_to_environment(rotor_positions_w, rotor_thrusts, downwash_dir_w)
         base_torque_w = np.sum(rotor_torques_w, axis=0).reshape(1, 3)
         if self._base_link is not None:
             self._apply_link_torques([self._base_link], base_torque_w)
 
     def _update_custom_control(self):
+        """Hook for subclasses that add extra actuation beyond the vehicle."""
+
         return
 
     def step(self):
+        """Advance the Genesis backend, PX4 bridge, and vehicle physics by one step."""
+
         self._ensure_runtime_ready()
+        self._ensure_px4_interface()
         self._step_count += 1
-        self._simulation_time_us += int(self._dt_s * 1e6)
+        self._advance_simulation_time_seconds(self._dt_s)
         if not self._px4_interface.is_connected:
             self._px4_interface.update_connection_state()
         else:
-            self._update_sensors_and_send()
-            self._update_gps_and_send()
-            self._update_px4_controls()
+            sensor_sent = self._sensor_bridge.update()
+            self._update_px4_controls(sensor_sent)
             self._apply_motor_physics()
         self._update_custom_control()
         self._scene.step()
+
+    def close(self):
+        """Release PX4 resources and then delegate base-backend cleanup."""
+
+        if self._px4_interface is not None:
+            self._px4_interface.close()
+        super().close()

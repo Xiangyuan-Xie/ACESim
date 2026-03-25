@@ -23,6 +23,7 @@ dependencies = [
     "scipy",
     "tqdm",
     "pymavlink",
+    "pyzmq",
 ]
 
 [tool.setuptools.packages.find]

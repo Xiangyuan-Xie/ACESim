@@ -1,8 +1,9 @@
+"""MuJoCo multirotor environment extended with the manipulator control stack."""
+
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import mujoco
-import numpy as np
 from acetele.core.make_robot import make_robot
 
 from acesim.config.config_loader import ConfigLoader
@@ -10,16 +11,17 @@ from acesim.env.mujoco.multirotor_env import MultirotorEnv
 
 
 class MCArmEnv(MultirotorEnv):
-    # === Initialization ===
+    """MuJoCo multirotor environment with an attached arm control agent."""
+
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
         self._robot = make_robot()
         self._initialize_arm_handles()
-        self._extend_downwash_targets_to_arm_links()
         self._reset_to_home()
 
-    # === Arm Model Handles ===
     def _initialize_arm_handles(self):
+        """Resolve MuJoCo actuators that correspond to the arm joints."""
+
         self._arm_joint_names = [
             "joint_1",
             "joint_2",
@@ -33,26 +35,9 @@ class MCArmEnv(MultirotorEnv):
             mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_ACTUATOR, name) for name in self._arm_joint_names
         ]
 
-    def _extend_downwash_targets_to_arm_links(self):
-        arm_body_ids = []
-        for joint_name in self._arm_joint_names:
-            joint_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
-            if joint_id < 0:
-                continue
-            body_id = int(self._mj_model.jnt_bodyid[joint_id])
-            if body_id == self._base_link_id:
-                continue
-            if body_id in self._rotor_body_ids:
-                continue
-            if self._mj_model.body_mass[body_id] <= 0.0:
-                continue
-            arm_body_ids.append(body_id)
-        merged_ids = set(self._downwash_target_body_ids.tolist())
-        merged_ids.update(arm_body_ids)
-        self._downwash_target_body_ids = np.array(sorted(merged_ids), dtype=int)
-
-    # === Home Pose Reset ===
     def _resolve_home_keyframe(self):
+        """Return the preferred home keyframe, favoring scene-specific overrides."""
+
         for name in ("scene_home", "home"):
             key_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_KEY, name)
             if key_id >= 0:
@@ -60,6 +45,8 @@ class MCArmEnv(MultirotorEnv):
         return -1, ""
 
     def _load_asset_home_qpos(self):
+        """Read the asset-level home qpos used when the scene keyframe is not sufficient."""
+
         asset_name = self._config_loader.get_asset_name()
         asset_xml = (Path(__file__).parent / "asset" / asset_name / f"{asset_name}.xml").resolve()
         root = ET.parse(asset_xml).getroot()
@@ -73,6 +60,8 @@ class MCArmEnv(MultirotorEnv):
         return []
 
     def _reset_with_home_pose(self, key_id: int):
+        """Reset to the scene and then reapply the robot-only home pose if needed."""
+
         mujoco.mj_resetData(self._mj_model, self._mj_data)
         base_joint_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_JOINT, "floating_base_joint")
         if base_joint_id < 0:
@@ -88,6 +77,8 @@ class MCArmEnv(MultirotorEnv):
         mujoco.mj_forward(self._mj_model, self._mj_data)
 
     def _sync_arm_ctrl_to_current_qpos(self):
+        """Initialize arm actuator targets from the current joint configuration."""
+
         home_pose = []
         for i, act_id in enumerate(self._arm_actuator_ids):
             j_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_JOINT, self._arm_joint_names[i])
@@ -97,24 +88,24 @@ class MCArmEnv(MultirotorEnv):
         return home_pose
 
     def _reset_to_home(self):
-        # [1] Resolve target keyframe
+        """Reset the environment and synchronize the arm controller's targets."""
+
         key_id, key_name = self._resolve_home_keyframe()
         if key_id < 0:
             print("No 'home' keyframe found. Using default.")
             return
 
-        # [2] Reset state from selected keyframe policy
         if key_name == "home":
             self._reset_with_home_pose(key_id)
         else:
             mujoco.mj_resetDataKeyframe(self._mj_model, self._mj_data, key_id)
 
-        # [3] Initialize arm controller targets
         home_pose = self._sync_arm_ctrl_to_current_qpos()
         print(f"Loading '{key_name}' keyframe: [{', '.join([f'{v:.3f}' for v in home_pose])}]")
 
-    # === Control Update ===
     def _update_arm_control(self):
+        """Drive the manipulator at 50 Hz while the vehicle loop runs at 250 Hz."""
+
         if self._step_count % 5 == 0:
             joint_pos, _, _ = self._robot.act()
             for i, act_id in enumerate(self._arm_actuator_ids):
@@ -122,8 +113,12 @@ class MCArmEnv(MultirotorEnv):
                     self._mj_data.ctrl[act_id] = joint_pos[i]
 
     def _update_custom_control(self):
+        """Extend the multirotor control hook with manipulator actuation."""
+
         self._update_arm_control()  # arm: 50Hz
 
-    # === Cleanup ===
     def close(self):
+        """Release the arm agent before delegating backend cleanup."""
+
         self._robot.close()
+        super().close()

@@ -1,3 +1,5 @@
+"""Base Genesis environment with shared clock and temporary merged MJCF."""
+
 import tempfile
 import xml.etree.ElementTree as ET
 from copy import deepcopy
@@ -7,9 +9,18 @@ import genesis as gs
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.base_env import BaseEnv
+from acesim.utils.sim_clock import SimulationClock
 
 
 class GenesisEnv(BaseEnv):
+    """Base class for Genesis environments used in ACESim.
+
+    Genesis currently consumes MJCF assets, so this base class merges the
+    MuJoCo scene and asset XML into a temporary file, owns the Genesis scene
+    lifecycle, and exposes the same shared simulation clock API used by the
+    MuJoCo backend.
+    """
+
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
         gs.init(backend=gs.cpu, logging_level="warning")
@@ -27,14 +38,38 @@ class GenesisEnv(BaseEnv):
         self._merged_xml_file.close()
         self._merged_xml_path = Path(self._merged_xml_file.name).resolve()
 
-        self._simulation_time_us = 0
+        self._sim_clock = SimulationClock()
         self._step_count = 0
         self._dt_s = 0.002
         self._scene = None
         self._robot = None
         self._scene_show_viewer = False
 
+    @property
+    def _simulation_time_us(self) -> int:
+        """Return the current simulated time in microseconds."""
+
+        return self._sim_clock.current_time_us
+
+    @_simulation_time_us.setter
+    def _simulation_time_us(self, value: int) -> None:
+        """Reset the shared simulation clock to an absolute timestamp."""
+
+        self._sim_clock.reset(value)
+
+    def _advance_simulation_time_us(self, delta_us: int) -> int:
+        """Advance the shared simulation clock by a microsecond delta."""
+
+        return self._sim_clock.advance_us(delta_us)
+
+    def _advance_simulation_time_seconds(self, dt_s: float) -> int:
+        """Advance the shared simulation clock by seconds."""
+
+        return self._sim_clock.advance_seconds(dt_s)
+
     def run(self):
+        """Build a viewer scene if needed and keep stepping until interrupted."""
+
         if self._scene is None or not self._scene_show_viewer:
             self._scene = None
             self._robot = None
@@ -52,6 +87,8 @@ class GenesisEnv(BaseEnv):
             return
 
     def step(self):
+        """Advance the Genesis simulation by one backend step."""
+
         if self._scene is None:
             self._scene = gs.Scene(
                 sim_options=gs.options.SimOptions(dt=self._dt_s),
@@ -61,18 +98,23 @@ class GenesisEnv(BaseEnv):
             self._scene.build()
             self._scene_show_viewer = False
         self._step_count += 1
-        self._simulation_time_us += int(self._dt_s * 1e6)
+        self._advance_simulation_time_seconds(self._dt_s)
         self._scene.step()
 
     def close(self):
+        """Release the scene, shared clock, and temporary merged MJCF file."""
+
         if self._scene is not None:
             self._scene = None
             self._robot = None
+        self._sim_clock.close()
         merged_xml_path = getattr(self, "_merged_xml_path", None)
         if isinstance(merged_xml_path, Path) and merged_xml_path.exists():
             merged_xml_path.unlink()
 
     def _merge_scene_robot_xml(self, scene_path: Path, robot_path: Path) -> str:
+        """Merge a scene XML tree with an asset XML tree into one MJCF string."""
+
         scene_root = ET.parse(scene_path).getroot()
         robot_root = ET.parse(robot_path).getroot()
 

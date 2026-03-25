@@ -18,7 +18,12 @@ setup(
     install_requires=[
         "setuptools",
         "PyYAML",
+        "pyzmq",
     ],
     zip_safe=True,
-    entry_points={},
+    entry_points={
+        "console_scripts": [
+            "clock_zmq_bridge = px4_sim_ros2.clock_zmq_bridge:main",
+        ],
+    },
 )
