@@ -9,8 +9,8 @@ from acetele.core.make_robot import make_robot
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.multirotor_env import MultirotorEnv
-from acesim.utils.arm_state_manager import ArmStateManager
-from acesim.utils.servo_bridge import ServoBridge, ServoControlSample, ServoStateSample
+from acesim.utils.arm_servo_scheduler import ArmControlSample, ArmServoScheduler, ArmStateSample
+from acesim.utils.arm_state_publisher import ArmStatePublisher
 
 
 @dataclass
@@ -49,10 +49,10 @@ class MCArmEnv(MultirotorEnv):
         self._arm_joint_ids = [
             mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_JOINT, name) for name in self._arm_joint_names
         ]
-        self._arm_state_manager = ArmStateManager()
-        self._servo_bridge = ServoBridge(
+        self._arm_state_publisher = ArmStatePublisher()
+        self._arm_servo_scheduler = ArmServoScheduler(
             clock=self._sim_clock,
-            manager=self._arm_state_manager,
+            publisher=self._arm_state_publisher,
             control_rate_hz=self._arm_params.arm_control_rate_hz,
             state_publish_rate_hz=self._arm_params.arm_state_publish_rate_hz,
             read_control_target=self._read_arm_control_target,
@@ -60,7 +60,7 @@ class MCArmEnv(MultirotorEnv):
             read_state=self._read_arm_joint_state,
         )
         self._reset_to_home()
-        self._servo_bridge.reset()
+        self._arm_servo_scheduler.reset()
 
     def _resolve_home_keyframe(self):
         """Return the preferred home keyframe, favoring scene-specific overrides."""
@@ -130,20 +130,20 @@ class MCArmEnv(MultirotorEnv):
         home_pose = self._sync_arm_ctrl_to_current_qpos()
         print(f"Loading '{key_name}' keyframe: [{', '.join([f'{v:.3f}' for v in home_pose])}]")
 
-    def _read_arm_control_target(self) -> ServoControlSample | None:
+    def _read_arm_control_target(self) -> ArmControlSample | None:
         """Read the next arm control target from the robot controller."""
 
         joint_pos, _, _ = self._robot.act()
-        return ServoControlSample(joint_positions=joint_pos)
+        return ArmControlSample(joint_positions=joint_pos)
 
-    def _apply_arm_control(self, control_sample: ServoControlSample) -> None:
+    def _apply_arm_control(self, control_sample: ArmControlSample) -> None:
         """Apply one scheduled arm control sample to MuJoCo actuators."""
 
         for i, act_id in enumerate(self._arm_actuator_ids):
             if act_id >= 0 and i < len(control_sample.joint_positions):
                 self._mj_data.ctrl[act_id] = control_sample.joint_positions[i]
 
-    def _read_arm_joint_state(self) -> ServoStateSample:
+    def _read_arm_joint_state(self) -> ArmStateSample:
         """Return the current MuJoCo arm state for the five exported joints."""
 
         positions: list[float] = []
@@ -162,15 +162,15 @@ class MCArmEnv(MultirotorEnv):
             velocities.append(float(self._mj_data.qvel[qvel_adr]))
             efforts.append(float(self._mj_data.qfrc_actuator[qvel_adr]))
 
-        return ServoStateSample(positions=positions, velocities=velocities, efforts=efforts)
+        return ArmStateSample(positions=positions, velocities=velocities, efforts=efforts)
 
     def _update_custom_control(self):
         """Extend the multirotor control hook with manipulator actuation."""
 
-        self._servo_bridge.update()
+        self._arm_servo_scheduler.update()
 
     def close(self):
         """Release the arm agent before delegating backend cleanup."""
 
         self._robot.close()
-        self._arm_state_manager.close()
+        self._arm_state_publisher.close()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Coordinate-frame helpers shared by the PX4 HIL bridge.
+"""Coordinate-frame helpers shared by the PX4 HIL transport and sensor scheduler.
 
 The simulator backends expose their world-frame quantities in NWU
 (north-west-up). Body-frame IMU and magnetometer values are produced in FLU

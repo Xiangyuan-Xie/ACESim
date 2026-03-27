@@ -11,8 +11,8 @@ from scipy.spatial.transform import Rotation
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.genesis.genesis_env import GenesisEnv
 from acesim.utils.frame import body_flu_to_frd
-from acesim.utils.px4_interface import PX4ActuatorParams, PX4Interface, PX4SensorParams
-from acesim.utils.px4_sensor_bridge import PX4SensorBridge, PX4SensorSample
+from acesim.utils.px4_sensor_scheduler import PX4SensorSample, PX4SensorScheduler
+from acesim.utils.px4_transport import PX4ActuatorParams, PX4SensorParams, PX4Transport
 
 
 @dataclass
@@ -65,8 +65,8 @@ class MultirotorEnv(GenesisEnv):
             motor_cmd_rate_hz=self._px4_sensor_params.hil_sensor_rate_hz
         )
 
-        self._px4_interface = None
-        self._sensor_bridge = None
+        self._px4_transport = None
+        self._sensor_scheduler = None
         self._runtime_initialized = False
         self._base_link = None
         self._rotor_links: list[Any] = []
@@ -264,13 +264,13 @@ class MultirotorEnv(GenesisEnv):
         if not self._runtime_initialized:
             self._initialize_runtime_handles()
 
-    def _ensure_px4_interface(self):
+    def _ensure_px4_transport(self):
         """Create PX4 transport objects after the runtime state becomes usable."""
 
-        if self._px4_interface is None:
-            self._px4_interface = PX4Interface(self._px4_actuator_params)
-            self._sensor_bridge = PX4SensorBridge(
-                self._px4_interface,
+        if self._px4_transport is None:
+            self._px4_transport = PX4Transport(self._px4_actuator_params)
+            self._sensor_scheduler = PX4SensorScheduler(
+                self._px4_transport,
                 self._sim_clock,
                 self._px4_sensor_params,
                 self.read_sensor_sample,
@@ -329,7 +329,7 @@ class MultirotorEnv(GenesisEnv):
 
         if not sensor_sent:
             return
-        px4 = self._px4_interface
+        px4 = self._px4_transport
         assert px4 is not None
         px4.update_actuator_commands(self._simulation_time_us, self._rotor_count)
         controls = px4.read_applied_actuator_controls(self._rotor_count)
@@ -466,16 +466,16 @@ class MultirotorEnv(GenesisEnv):
         return
 
     def step(self):
-        """Advance the Genesis backend, PX4 bridge, and vehicle physics by one step."""
+        """Advance the Genesis backend, PX4 transport, and vehicle physics by one step."""
 
         self._ensure_runtime_ready()
-        self._ensure_px4_interface()
+        self._ensure_px4_transport()
         self._step_count += 1
         self._advance_simulation_time_seconds(self._dt_s)
-        if not self._px4_interface.is_connected:
-            self._px4_interface.update_connection_state()
+        if not self._px4_transport.is_connected:
+            self._px4_transport.update_connection_state()
         else:
-            sensor_sent = self._sensor_bridge.update()
+            sensor_sent = self._sensor_scheduler.update()
             self._update_px4_controls(sensor_sent)
             self._apply_motor_physics()
         self._update_custom_control()
@@ -484,6 +484,6 @@ class MultirotorEnv(GenesisEnv):
     def close(self):
         """Release PX4 resources and then delegate base-backend cleanup."""
 
-        if self._px4_interface is not None:
-            self._px4_interface.close()
+        if self._px4_transport is not None:
+            self._px4_transport.close()
         super().close()

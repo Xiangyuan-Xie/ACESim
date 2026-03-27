@@ -11,8 +11,8 @@ from scipy.spatial.transform import Rotation
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.mujoco_env import MujocoEnv
 from acesim.utils.frame import body_flu_to_frd
-from acesim.utils.px4_interface import PX4ActuatorParams, PX4Interface, PX4SensorParams
-from acesim.utils.px4_sensor_bridge import PX4SensorBridge, PX4SensorSample
+from acesim.utils.px4_sensor_scheduler import PX4SensorSample, PX4SensorScheduler
+from acesim.utils.px4_transport import PX4ActuatorParams, PX4SensorParams, PX4Transport
 
 
 @dataclass
@@ -63,35 +63,18 @@ class MultirotorEnv(MujocoEnv):
             gps_rate_hz=float(asset_params.get("gps_rate_hz", 30.0)),
             dynamic_hil_sensor_fields=False,
         )
-        delay_steps_range_raw = asset_params.get("motor_exec_delay_steps_range", (2, 6))
-        delay_update_range_raw = asset_params.get("motor_exec_delay_update_steps_range", (4, 8))
-        delay_transition_probs_raw = asset_params.get("motor_exec_delay_transition_probs", (0.15, 0.70, 0.15))
-
-        assert len(delay_steps_range_raw) == 2, "motor_exec_delay_steps_range must contain [min, max]"
-        assert len(delay_update_range_raw) == 2, "motor_exec_delay_update_steps_range must contain [min, max]"
-        assert len(delay_transition_probs_raw) == 3, "motor_exec_delay_transition_probs must contain three values"
-
-        # Explicit tuple construction keeps the runtime config shape checked and
-        # gives mypy the fixed tuple lengths required by PX4ActuatorParams.
-        delay_steps_range = (int(delay_steps_range_raw[0]), int(delay_steps_range_raw[1]))
-        delay_update_range = (int(delay_update_range_raw[0]), int(delay_update_range_raw[1]))
-        delay_transition_probs = (
-            float(delay_transition_probs_raw[0]),
-            float(delay_transition_probs_raw[1]),
-            float(delay_transition_probs_raw[2]),
-        )
+        delay_ms_range_raw = asset_params.get("motor_exec_delay_ms_range", (2.0, 10.0))
+        assert len(delay_ms_range_raw) == 2, "motor_exec_delay_ms_range must contain [min, max]"
+        delay_ms_range = (float(delay_ms_range_raw[0]), float(delay_ms_range_raw[1]))
         self._px4_actuator_params = PX4ActuatorParams(
             motor_cmd_rate_hz=float(asset_params.get("motor_cmd_rate_hz", 200.0)),
-            motor_exec_delay_steps_range=delay_steps_range,
-            motor_exec_delay_update_steps_range=delay_update_range,
-            motor_exec_delay_transition_probs=delay_transition_probs,
-            motor_exec_delay_drop_prob=float(asset_params.get("motor_exec_delay_drop_prob", 0.03)),
+            motor_exec_delay_ms_range=delay_ms_range,
         )
 
-        self._px4_interface = PX4Interface(self._px4_actuator_params)
+        self._px4_transport = PX4Transport(self._px4_actuator_params)
         self._initialize_multirotor_handles()
-        self._sensor_bridge = PX4SensorBridge(
-            self._px4_interface,
+        self._sensor_scheduler = PX4SensorScheduler(
+            self._px4_transport,
             self._sim_clock,
             self._px4_sensor_params,
             self.read_sensor_sample,
@@ -198,7 +181,7 @@ class MultirotorEnv(MujocoEnv):
         MuJoCo exposes `framepos` and `framelinvel` in the simulator world frame
         used across this codebase, which is NWU. The IMU and magnetometer
         sensors are body-frame FLU and are converted here into PX4's FRD
-        convention before they reach the bridge.
+        convention before they reach the PX4 sensor scheduler.
         """
 
         accel_flu = self._get_sensor_raw("accel")
@@ -215,8 +198,8 @@ class MultirotorEnv(MujocoEnv):
     def _update_px4_controls(self) -> None:
         """Map released normalized PX4 controls onto rotor speed targets."""
 
-        self._px4_interface.update_actuator_commands(self._simulation_time_us, self._rotor_count)
-        controls = self._px4_interface.read_applied_actuator_controls(self._rotor_count)
+        self._px4_transport.update_actuator_commands(self._simulation_time_us, self._rotor_count)
+        controls = self._px4_transport.read_applied_actuator_controls(self._rotor_count)
         if controls is None:
             return
         desired = np.clip(controls * self._params.max_rot_velocity, 0.0, self._params.max_rot_velocity)
@@ -331,7 +314,7 @@ class MultirotorEnv(MujocoEnv):
         base_pos = self._get_sensor_raw("pos")
         base_quat = self._get_sensor_raw("quat")
         rb = Rotation.from_quat(base_quat, scalar_first=True)
-        armed = self._px4_interface.update_arming_state()
+        armed = self._px4_transport.update_arming_state()
         for i in range(self._rotor_count):
             mocap_id = self._rotor_mocap_ids[i]
             if mocap_id < 0:
@@ -354,10 +337,10 @@ class MultirotorEnv(MujocoEnv):
 
         self._step_count += 1
         self._advance_simulation_time_seconds(model.opt.timestep)
-        if not self._px4_interface.is_connected:
-            self._px4_interface.update_connection_state()
+        if not self._px4_transport.is_connected:
+            self._px4_transport.update_connection_state()
         else:
-            self._sensor_bridge.update()
+            self._sensor_scheduler.update()
             self._update_px4_controls()
             self._apply_motor_physics()
         self._update_custom_control()
@@ -366,4 +349,4 @@ class MultirotorEnv(MujocoEnv):
     def close(self) -> None:
         """Release PX4 resources and then delegate base-backend cleanup."""
 
-        self._px4_interface.close()
+        self._px4_transport.close()
