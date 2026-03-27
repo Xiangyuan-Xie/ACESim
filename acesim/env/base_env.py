@@ -14,9 +14,13 @@ class BaseEnv(ABC):
         self._config_loader = config_loader
 
     @abstractmethod
-    def run(self):
+    def run(self) -> None:
         """Run the environment's viewer or main loop."""
 
     @abstractmethod
-    def close(self):
+    def step(self) -> None:
+        """Advance the environment by one simulation step."""
+
+    @abstractmethod
+    def close(self) -> None:
         """Release backend resources owned by the environment."""

@@ -33,10 +33,7 @@ class ArmStateZmqBridge(Node):
         self._socket = self._zmq_context.socket(zmq.SUB)
         self._socket.setsockopt(zmq.LINGER, 0)
         self._socket.setsockopt(zmq.RCVHWM, 1)
-        try:
-            self._socket.setsockopt(zmq.CONFLATE, 1)
-        except (AttributeError, zmq.ZMQError):
-            pass
+        self._socket.setsockopt(zmq.CONFLATE, 1)
         self._socket.setsockopt(zmq.SUBSCRIBE, b"")
         self._socket.connect(endpoint)
 
@@ -50,23 +47,14 @@ class ArmStateZmqBridge(Node):
                 payload = self._socket.recv(flags=zmq.NOBLOCK)
             except zmq.Again:
                 return
-            except zmq.ZMQError as exc:
-                self.get_logger().error(f"ZMQ receive error: {exc}")
-                return
 
             if len(payload) != self._STRUCT.size:
-                self.get_logger().warning(
-                    f"Unexpected arm-state payload size={len(payload)}, expected {self._STRUCT.size}"
-                )
-                continue
+                raise RuntimeError(f"Unexpected arm-state payload size={len(payload)}, expected {self._STRUCT.size}")
 
             decoded = self._STRUCT.unpack(payload)
             sim_time_us = decoded[0]
             if sim_time_us < self._last_sim_time_us:
-                self.get_logger().warning(
-                    f"Dropped non-monotonic arm-state sample: {sim_time_us} < {self._last_sim_time_us}"
-                )
-                continue
+                raise RuntimeError(f"Dropped non-monotonic arm-state sample: {sim_time_us} < {self._last_sim_time_us}")
 
             self._last_sim_time_us = sim_time_us
             msg = JointState()
@@ -86,11 +74,11 @@ class ArmStateZmqBridge(Node):
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bridge ACESim ZeroMQ arm state to ROS2 /arm/state")
     parser.add_argument("--mode", choices=["linux", "wsl"], default="linux")
-    args = parser.parse_args()
+    args, remaining_args = parser.parse_known_args()
 
     endpoint = resolve_endpoint(args.mode, 5601)
 
-    rclpy.init()
+    rclpy.init(args=remaining_args)
     node = ArmStateZmqBridge(endpoint)
     try:
         rclpy.spin(node)
@@ -98,7 +86,8 @@ def main() -> None:
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

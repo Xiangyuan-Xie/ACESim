@@ -10,6 +10,7 @@ The simulator backends expose their world-frame quantities in NWU
 """
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 
 def body_flu_to_frd(vec_flu: np.ndarray) -> np.ndarray:
@@ -24,3 +25,23 @@ def world_nwu_to_ned(vec_world_nwu: np.ndarray) -> np.ndarray:
 
     vec_world_nwu = np.asarray(vec_world_nwu, dtype=float)
     return np.array([vec_world_nwu[0], -vec_world_nwu[1], -vec_world_nwu[2]], dtype=float)
+
+
+def rotation_world_nwu_body_flu_to_ned_frd(rotation_world_nwu_body_flu: Rotation) -> Rotation:
+    """Convert a body-to-world rotation from NWU/FLU to NED/FRD."""
+
+    transform = np.diag([1.0, -1.0, -1.0])
+    matrix_nwu_flu = rotation_world_nwu_body_flu.as_matrix()
+    matrix_ned_frd = transform @ matrix_nwu_flu @ transform
+    return Rotation.from_matrix(matrix_ned_frd)
+
+
+def quat_world_nwu_body_flu_to_ned_frd(quat_world_nwu_body_flu: np.ndarray) -> np.ndarray:
+    """Convert a scalar-first body-to-world quaternion from NWU/FLU to NED/FRD."""
+
+    quat = np.asarray(quat_world_nwu_body_flu, dtype=float).reshape(-1)
+    if quat.size != 4:
+        raise ValueError("quat_world_nwu_body_flu must contain four elements")
+    rotation = Rotation.from_quat(quat, scalar_first=True)
+    converted = rotation_world_nwu_body_flu_to_ned_frd(rotation)
+    return converted.as_quat(scalar_first=True)

@@ -8,11 +8,14 @@ try to hide malformed input or support multiple transport strategies.
 
 import threading
 from dataclasses import dataclass
-from typing import Any, Sequence, TypeAlias
+from typing import Any, Mapping, Sequence, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
 from pymavlink import mavutil
+from scipy.spatial.transform import Rotation
+
+from acesim.utils.frame import rotation_world_nwu_body_flu_to_ned_frd, world_nwu_to_ned
 
 FloatArray: TypeAlias = NDArray[np.float64]
 
@@ -53,10 +56,12 @@ class PX4SensorParams:
     idle_visual_speed: float = 55.0
     gps_home_lat_lon: tuple[float, float] = (39.98329, 116.34745)
     gps_alt_start: float = 50.0
+    fusion_mode: str = "hil"
     hil_sensor_rate_hz: float = 250.0
     mag_rate_hz: float = 100.0
     baro_rate_hz: float = 50.0
     gps_rate_hz: float = 30.0
+    vision_rate_hz: float = 100.0
     accel_noise_std_mps2: tuple[float, float, float] = (0.00637, 0.00637, 0.00686)
     gyro_noise_std_radps: float = 0.0008726646
     mag_noise_std_gauss: float = 0.003
@@ -64,6 +69,130 @@ class PX4SensorParams:
     gps_pos_noise_std_m: float = 0.01
     gps_vel_noise_std_mps: float = 0.1
     dynamic_hil_sensor_fields: bool = False
+    ekf2_ev_ctrl: int = 11
+    ekf2_hgt_ref: str = "Vision"
+    ekf2_ev_delay_ms: float = 0.0
+    ekf2_ev_pos_body_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    ekf2_ev_noise_md: int = 1
+    ekf2_evp_noise: float = 0.003
+    ekf2_evv_noise: float = 0.01
+    ekf2_eva_noise: float = 0.01
+    ekf2_gps_ctrl: int = 0
+    ekf2_mag_type: int = 0
+
+    def __post_init__(self) -> None:
+        if self.fusion_mode not in {"hil", "mocap"}:
+            raise ValueError("fusion_mode must be 'hil' or 'mocap'")
+        if self.hil_sensor_rate_hz <= 0.0:
+            raise ValueError("hil_sensor_rate_hz must be positive")
+        if self.send_mag and self.mag_rate_hz <= 0.0:
+            raise ValueError("mag_rate_hz must be positive when magnetometer streaming is enabled")
+        if self.send_baro and self.baro_rate_hz <= 0.0:
+            raise ValueError("baro_rate_hz must be positive when barometer streaming is enabled")
+        if self.send_gps and self.gps_rate_hz <= 0.0:
+            raise ValueError("gps_rate_hz must be positive when GPS streaming is enabled")
+        if self.send_vision and self.vision_rate_hz <= 0.0:
+            raise ValueError("vision_rate_hz must be positive when vision streaming is enabled")
+        if len(self.ekf2_ev_pos_body_m) != 3:
+            raise ValueError("ekf2_ev_pos_body_m must contain exactly three values")
+
+    @property
+    def send_mag(self) -> bool:
+        return self.fusion_mode == "hil"
+
+    @property
+    def send_baro(self) -> bool:
+        return self.fusion_mode == "hil"
+
+    @property
+    def send_gps(self) -> bool:
+        return self.fusion_mode == "hil"
+
+    @property
+    def send_vision(self) -> bool:
+        return self.fusion_mode == "mocap"
+
+    @staticmethod
+    def _parse_vec3(value: object, field_name: str) -> tuple[float, float, float]:
+        """Parse a generic config value into a strict 3D float tuple."""
+
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            raise ValueError(f"{field_name} must contain exactly three values")
+        values = tuple(float(v) for v in value)
+        if len(values) != 3:
+            raise ValueError(f"{field_name} must contain exactly three values")
+        return (values[0], values[1], values[2])
+
+    @classmethod
+    def from_asset_params(
+        cls,
+        asset_params: Mapping[str, Any],
+        *,
+        dynamic_hil_sensor_fields: bool,
+    ) -> "PX4SensorParams":
+        px4_fusion = asset_params.get("px4_fusion")
+        idle_visual_speed = float(asset_params.get("idle_visual_speed", 55.0))
+        gps_home_lat_lon = (
+            float(asset_params.get("gps_lat_start", 39.98329)),
+            float(asset_params.get("gps_lon_start", 116.34745)),
+        )
+        gps_alt_start = float(asset_params.get("gps_alt_start", 50.0))
+        if not isinstance(px4_fusion, Mapping):
+            return cls(
+                idle_visual_speed=idle_visual_speed,
+                gps_home_lat_lon=gps_home_lat_lon,
+                gps_alt_start=gps_alt_start,
+                dynamic_hil_sensor_fields=dynamic_hil_sensor_fields,
+                fusion_mode="hil",
+                hil_sensor_rate_hz=float(asset_params.get("hil_sensor_rate_hz", 250.0)),
+                mag_rate_hz=float(asset_params.get("mag_rate_hz", 100.0)),
+                baro_rate_hz=float(asset_params.get("baro_rate_hz", 50.0)),
+                gps_rate_hz=float(asset_params.get("gps_rate_hz", 30.0)),
+            )
+
+        mode = str(px4_fusion.get("mode", "hil"))
+        mode_config = px4_fusion.get(mode, {})
+        if not isinstance(mode_config, Mapping):
+            raise ValueError(f"px4_fusion.{mode} must be a table")
+
+        if mode == "hil":
+            return cls(
+                idle_visual_speed=idle_visual_speed,
+                gps_home_lat_lon=gps_home_lat_lon,
+                gps_alt_start=gps_alt_start,
+                dynamic_hil_sensor_fields=dynamic_hil_sensor_fields,
+                fusion_mode=mode,
+                hil_sensor_rate_hz=float(mode_config.get("hil_sensor_rate_hz", 250.0)),
+                mag_rate_hz=float(mode_config.get("mag_rate_hz", 100.0)),
+                baro_rate_hz=float(mode_config.get("baro_rate_hz", 50.0)),
+                gps_rate_hz=float(mode_config.get("gps_rate_hz", 30.0)),
+            )
+        if mode == "mocap":
+            ev_pos_body_m = cls._parse_vec3(
+                mode_config.get("ekf2_ev_pos_body_m", (0.0, 0.0, 0.0)), "ekf2_ev_pos_body_m"
+            )
+            return cls(
+                idle_visual_speed=idle_visual_speed,
+                gps_home_lat_lon=gps_home_lat_lon,
+                gps_alt_start=gps_alt_start,
+                dynamic_hil_sensor_fields=dynamic_hil_sensor_fields,
+                fusion_mode=mode,
+                hil_sensor_rate_hz=float(mode_config.get("hil_sensor_rate_hz", 250.0)),
+                mag_rate_hz=float(mode_config.get("mag_rate_hz", 100.0)),
+                baro_rate_hz=float(mode_config.get("baro_rate_hz", 50.0)),
+                vision_rate_hz=float(mode_config.get("vision_rate_hz", 100.0)),
+                ekf2_ev_ctrl=int(mode_config.get("ekf2_ev_ctrl", 11)),
+                ekf2_hgt_ref=str(mode_config.get("ekf2_hgt_ref", "Vision")),
+                ekf2_ev_delay_ms=float(mode_config.get("ekf2_ev_delay_ms", 0.0)),
+                ekf2_ev_pos_body_m=ev_pos_body_m,
+                ekf2_ev_noise_md=int(mode_config.get("ekf2_ev_noise_md", 1)),
+                ekf2_evp_noise=float(mode_config.get("ekf2_evp_noise", 0.003)),
+                ekf2_evv_noise=float(mode_config.get("ekf2_evv_noise", 0.01)),
+                ekf2_eva_noise=float(mode_config.get("ekf2_eva_noise", 0.01)),
+                ekf2_gps_ctrl=int(mode_config.get("ekf2_gps_ctrl", 0)),
+                ekf2_mag_type=int(mode_config.get("ekf2_mag_type", 0)),
+            )
+        raise ValueError(f"Unsupported px4_fusion mode: {mode}")
 
 
 class PX4Transport:
@@ -77,7 +206,7 @@ class PX4Transport:
 
     HIL_SENSOR_FIELDS_ACCEL = 0b0000000000111
     HIL_SENSOR_FIELDS_GYRO = 0b0000000111000
-    HIL_SENSOR_FIELDS_MAG = 0b0001110000000
+    HIL_SENSOR_FIELDS_MAG = 0b0000111000000
     HIL_SENSOR_FIELDS_BARO = 0b1101000000000
 
     def __init__(
@@ -89,8 +218,8 @@ class PX4Transport:
 
         self._port: int = port
         self._actuator_params = actuator_params
-        self._io_lock = threading.Lock()
-        self._mavlink_connection: Any = mavutil.mavlink_connection(
+        self._hil_io_lock = threading.Lock()
+        self._hil_mavlink_connection: Any = mavutil.mavlink_connection(
             f"tcpin:0.0.0.0:{self._port}", source_system=254, source_component=97
         )
         self._is_connected: bool = False
@@ -177,13 +306,13 @@ class PX4Transport:
         if not self._is_connected:
             raise RuntimeError("PX4 actuator controls requested before HEARTBEAT connection")
 
-        with self._io_lock:
-            msg = self._mavlink_connection.recv_match(type="HIL_ACTUATOR_CONTROLS", blocking=False)
+        with self._hil_io_lock:
+            msg = self._hil_mavlink_connection.recv_match(type="HIL_ACTUATOR_CONTROLS", blocking=False)
             if not msg:
                 return None
             latest_controls = msg.controls
             while True:
-                msg = self._mavlink_connection.recv_match(type="HIL_ACTUATOR_CONTROLS", blocking=False)
+                msg = self._hil_mavlink_connection.recv_match(type="HIL_ACTUATOR_CONTROLS", blocking=False)
                 if not msg:
                     break
                 latest_controls = msg.controls
@@ -234,8 +363,8 @@ class PX4Transport:
         if self._is_connected:
             return True
 
-        with self._io_lock:
-            msg = self._mavlink_connection.recv_match(type="HEARTBEAT", blocking=False)
+        with self._hil_io_lock:
+            msg = self._hil_mavlink_connection.recv_match(type="HEARTBEAT", blocking=False)
         if msg:
             return self._set_connected()
         return False
@@ -248,20 +377,17 @@ class PX4Transport:
         mag_frd: FloatArray,
         altitude_m: float,
         temperature_celsius: float = 25.0,
-        fields_updated: int | None = None,
+        fields_updated: int = HIL_SENSOR_FIELDS_ACCEL | HIL_SENSOR_FIELDS_GYRO,
     ) -> None:
         """Send one HIL_SENSOR sample after PX4 connection is established."""
 
         if not self._is_connected:
             raise RuntimeError("send_hil_sensor called before HEARTBEAT connection")
 
-        if fields_updated is None:
-            fields_updated = 0x1BFF
-
         abs_pressure = 1013.25 * (1 - 2.25577e-5 * altitude_m) ** 5.25588
 
-        with self._io_lock:
-            self._mavlink_connection.mav.hil_sensor_send(
+        with self._hil_io_lock:
+            self._hil_mavlink_connection.mav.hil_sensor_send(
                 timestamp_us,
                 accel_frd[0],
                 accel_frd[1],
@@ -298,8 +424,8 @@ class PX4Transport:
         if not self._is_connected:
             raise RuntimeError("send_hil_gps called before HEARTBEAT connection")
 
-        with self._io_lock:
-            self._mavlink_connection.mav.hil_gps_send(
+        with self._hil_io_lock:
+            self._hil_mavlink_connection.mav.hil_gps_send(
                 timestamp_us,
                 3,
                 int(latitude_e7),
@@ -315,19 +441,49 @@ class PX4Transport:
                 satellites_visible,
             )
 
+    def send_vision_position_estimate(
+        self,
+        timestamp_us: int,
+        position_world_m: FloatArray,
+        attitude_world_quat: FloatArray,
+    ) -> None:
+        """Send one external-vision pose sample converted into PX4's local NED/FRD frames."""
+
+        if not self._is_connected:
+            raise RuntimeError("send_vision_position_estimate called before HEARTBEAT connection")
+
+        position_ned = world_nwu_to_ned(np.asarray(position_world_m, dtype=float))
+        attitude_quat = np.asarray(attitude_world_quat, dtype=float)
+        if attitude_quat.shape != (4,):
+            raise ValueError("attitude_world_quat must be a flat scalar-first quaternion")
+        rotation_world_body = Rotation.from_quat(attitude_quat, scalar_first=True)
+        rotation_ned_frd = rotation_world_nwu_body_flu_to_ned_frd(rotation_world_body)
+        roll, pitch, yaw = rotation_ned_frd.as_euler("xyz", degrees=False)
+
+        with self._hil_io_lock:
+            self._hil_mavlink_connection.mav.vision_position_estimate_send(
+                timestamp_us,
+                float(position_ned[0]),
+                float(position_ned[1]),
+                float(position_ned[2]),
+                float(roll),
+                float(pitch),
+                float(yaw),
+            )
+
     def update_arming_state(self) -> bool:
         """Query PX4 motor arming state from the active MAVLink connection."""
 
         if not self._is_connected:
             return False
-        with self._io_lock:
-            self._is_armed = bool(self._mavlink_connection.motors_armed())
+        with self._hil_io_lock:
+            self._is_armed = bool(self._hil_mavlink_connection.motors_armed())
         return self._is_armed
 
     def close(self) -> None:
         """Close the MAVLink connection."""
 
-        connection = self._mavlink_connection
-        self._mavlink_connection = None
-        if connection is not None:
-            connection.close()
+        hil_connection = self._hil_mavlink_connection
+        self._hil_mavlink_connection = None
+        if hil_connection is not None:
+            hil_connection.close()

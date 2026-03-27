@@ -48,17 +48,8 @@ class MultirotorEnv(GenesisEnv):
             time_constant_down=float(config.get("time_constant_down", 0.025)),
             max_rot_velocity=float(config.get("max_rot_velocity", 1000.0)),
         )
-        self._px4_sensor_params = PX4SensorParams(
-            idle_visual_speed=float(asset_params.get("idle_visual_speed", 55.0)),
-            gps_home_lat_lon=(
-                float(asset_params.get("gps_lat_start", 39.98329)),
-                float(asset_params.get("gps_lon_start", 116.34745)),
-            ),
-            gps_alt_start=float(asset_params.get("gps_alt_start", 50.0)),
-            hil_sensor_rate_hz=float(asset_params.get("hil_sensor_rate_hz", 250.0)),
-            mag_rate_hz=float(asset_params.get("mag_rate_hz", 100.0)),
-            baro_rate_hz=float(asset_params.get("baro_rate_hz", 50.0)),
-            gps_rate_hz=float(asset_params.get("gps_rate_hz", 30.0)),
+        self._px4_sensor_params = PX4SensorParams.from_asset_params(
+            asset_params,
             dynamic_hil_sensor_fields=True,
         )
         self._px4_actuator_params = PX4ActuatorParams.zero_disturbance(
@@ -322,6 +313,7 @@ class MultirotorEnv(GenesisEnv):
             mag_frd=body_flu_to_frd(rb_inv.apply(mag_field_w)),
             position_world_m=self._get_link_pos(self._base_link),
             velocity_world_mps=v_com_w,
+            attitude_world_quat=self._get_link_quat(self._base_link),
         )
 
     def _update_px4_controls(self, sensor_sent: bool):

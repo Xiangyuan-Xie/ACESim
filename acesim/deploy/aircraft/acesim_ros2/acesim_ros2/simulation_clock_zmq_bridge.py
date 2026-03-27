@@ -75,11 +75,11 @@ class SimulationClockZmqBridge(Node):
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bridge ACESim ZeroMQ clock to ROS2 /acesim/clock")
     parser.add_argument("--mode", choices=["linux", "wsl"], default="linux")
-    args = parser.parse_args()
+    args, remaining_args = parser.parse_known_args()
 
     endpoint = resolve_endpoint(args.mode, 5600)
 
-    rclpy.init()
+    rclpy.init(args=remaining_args)
     node = SimulationClockZmqBridge(endpoint)
     try:
         rclpy.spin(node)
@@ -87,7 +87,8 @@ def main() -> None:
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

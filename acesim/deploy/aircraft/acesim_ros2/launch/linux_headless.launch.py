@@ -6,7 +6,7 @@ from launch.substitutions import LaunchConfiguration
 
 def _launch_setup(context):
     override = LaunchConfiguration("px4_repo").perform(context)
-    return build_linux_launch_entities(load_px4_repo_path(override), play_executable="acesim_play")
+    return build_linux_launch_entities(load_px4_repo_path(override), play_executable="acesim_play_headless")
 
 
 def generate_launch_description():

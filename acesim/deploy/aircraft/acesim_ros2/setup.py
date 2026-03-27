@@ -24,6 +24,8 @@ setup(
     entry_points={
         "console_scripts": [
             "acesim_play = acesim_ros2.acesim_play:main",
+            "acesim_play_headless = acesim_ros2.acesim_play_headless:main",
+            "px4_post_start_setup = acesim_ros2.px4_post_start_setup:main",
             "simulation_clock_zmq_bridge = acesim_ros2.simulation_clock_zmq_bridge:main",
             "arm_state_zmq_bridge = acesim_ros2.arm_state_zmq_bridge:main",
         ],
