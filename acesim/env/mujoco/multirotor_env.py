@@ -29,6 +29,9 @@ class MultirotorParams:
     time_constant_down: float
     max_rot_velocity: float
     max_relative_airspeed_mps: float
+    idle_visual_speed: float = 120.0
+    low_speed_blend_end: float = 180.0
+    visual_speed_smoothing_tc: float = 0.02
 
 
 class MultirotorEnv(MujocoEnv):
@@ -74,6 +77,8 @@ class MultirotorEnv(MujocoEnv):
         self._rotor_count = len(self._rotor_body_ids)
         self._desired_rotor_angular_velocity = np.zeros(self._rotor_count)
         self._rotor_angular_velocity = np.zeros(self._rotor_count)
+        self._visual_rotor_angular_velocity = np.zeros(self._rotor_count)
+        self._applied_actuator_controls = np.zeros(self._rotor_count)
         self._rotor_angle = np.zeros(self._rotor_count)
         direction = np.asarray(self._params.rotor_direction, dtype=float)
         if direction.size != self._rotor_count:
@@ -194,6 +199,7 @@ class MultirotorEnv(MujocoEnv):
         controls = self._px4_transport.read_applied_actuator_controls(self._rotor_count)
         if controls is None:
             return
+        self._applied_actuator_controls = controls
         desired = np.clip(controls * self._params.max_rot_velocity, 0.0, self._params.max_rot_velocity)
         self._desired_rotor_angular_velocity = desired
 
@@ -300,21 +306,45 @@ class MultirotorEnv(MujocoEnv):
         )
         self._apply_rotor_wrenches(rotor_positions_w, rotor_force_w, rotor_moment_w)
 
+    def _compute_visual_rotor_speed(self, rotor_idx: int, armed: bool) -> float:
+        """Blend a small low-speed visual assist into the physical rotor speed."""
+        physical_speed = max(0.0, float(self._rotor_angular_velocity[rotor_idx]))
+        actuator_output = float(self._applied_actuator_controls[rotor_idx])
+
+        if not armed:
+            return physical_speed
+
+        if actuator_output < 0.0:
+            return physical_speed
+
+        if actuator_output <= 0.0:
+            return max(physical_speed, self._params.idle_visual_speed)
+
+        blend_end = self._params.low_speed_blend_end
+        blend_weight = float(np.clip(1.0 - physical_speed / blend_end, 0.0, 1.0))
+        low_speed_target = blend_weight * self._params.idle_visual_speed + (1.0 - blend_weight) * physical_speed
+        return max(physical_speed, low_speed_target)
+
     def _update_rotor_visuals(self) -> None:
-        """Spin mocap-only rotor visuals using the simulated motor speed."""
+        """Spin mocap-only rotor visuals using physical speed with low-speed visual assist."""
 
         base_pos = self._get_sensor_raw("pos")
         base_quat = self._get_sensor_raw("quat")
         rb = Rotation.from_quat(base_quat, scalar_first=True)
         armed = self._px4_transport.update_arming_state()
+        dt_s = self._mj_model.opt.timestep
+        smoothing_tc = self._params.visual_speed_smoothing_tc
         for i in range(self._rotor_count):
             mocap_id = self._rotor_mocap_ids[i]
             if mocap_id < 0:
                 continue
-            visual_speed = self._rotor_angular_velocity[i]
-            if armed and visual_speed < self._px4_sensor_params.idle_visual_speed:
-                visual_speed = self._px4_sensor_params.idle_visual_speed
-            self._rotor_angle[i] += visual_speed * self._rotor_direction[i] * self._mj_model.opt.timestep
+            target_visual_speed = self._compute_visual_rotor_speed(i, armed)
+            if smoothing_tc > 0.0:
+                delta = target_visual_speed - self._visual_rotor_angular_velocity[i]
+                self._visual_rotor_angular_velocity[i] += delta * (1.0 - np.exp(-dt_s / smoothing_tc))
+            else:
+                self._visual_rotor_angular_velocity[i] = target_visual_speed
+            self._rotor_angle[i] += self._visual_rotor_angular_velocity[i] * self._rotor_direction[i] * dt_s
             spin = Rotation.from_rotvec([0.0, 0.0, self._rotor_angle[i]])
             q_total = (rb * spin).as_quat(scalar_first=True)
             pos_w = base_pos + rb.apply(self._rotor_offsets[i])

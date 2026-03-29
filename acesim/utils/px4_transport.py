@@ -51,9 +51,8 @@ class PX4ActuatorParams:
 
 @dataclass(frozen=True)
 class PX4SensorParams:
-    """Sampling, noise, and visualization parameters for PX4 HIL streams."""
+    """Sampling and noise parameters for PX4 HIL streams."""
 
-    idle_visual_speed: float = 55.0
     gps_home_lat_lon: tuple[float, float] = (39.98329, 116.34745)
     gps_alt_start: float = 50.0
     fusion_mode: str = "hil"
@@ -131,7 +130,6 @@ class PX4SensorParams:
         dynamic_hil_sensor_fields: bool,
     ) -> "PX4SensorParams":
         px4_fusion = asset_params.get("px4_fusion")
-        idle_visual_speed = float(asset_params.get("idle_visual_speed", 55.0))
         gps_home_lat_lon = (
             float(asset_params.get("gps_lat_start", 39.98329)),
             float(asset_params.get("gps_lon_start", 116.34745)),
@@ -139,7 +137,6 @@ class PX4SensorParams:
         gps_alt_start = float(asset_params.get("gps_alt_start", 50.0))
         if not isinstance(px4_fusion, Mapping):
             return cls(
-                idle_visual_speed=idle_visual_speed,
                 gps_home_lat_lon=gps_home_lat_lon,
                 gps_alt_start=gps_alt_start,
                 dynamic_hil_sensor_fields=dynamic_hil_sensor_fields,
@@ -157,7 +154,6 @@ class PX4SensorParams:
 
         if mode == "hil":
             return cls(
-                idle_visual_speed=idle_visual_speed,
                 gps_home_lat_lon=gps_home_lat_lon,
                 gps_alt_start=gps_alt_start,
                 dynamic_hil_sensor_fields=dynamic_hil_sensor_fields,
@@ -172,7 +168,6 @@ class PX4SensorParams:
                 mode_config.get("ekf2_ev_pos_body_m", (0.0, 0.0, 0.0)), "ekf2_ev_pos_body_m"
             )
             return cls(
-                idle_visual_speed=idle_visual_speed,
                 gps_home_lat_lon=gps_home_lat_lon,
                 gps_alt_start=gps_alt_start,
                 dynamic_hil_sensor_fields=dynamic_hil_sensor_fields,
