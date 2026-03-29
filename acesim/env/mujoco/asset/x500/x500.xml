@@ -1,0 +1,103 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="x500">
+  <compiler angle="radian" meshdir="meshes/" texturedir="meshes/" />
+  <option density="1.225" timestep="0.001" integrator="implicit" viscosity="1.8e-5" cone="elliptic" impratio="10" magnetic="2.73e-5 0 -4.54e-5" />
+  <size njmax="500" nconmax="100" />
+  <asset>
+    <mesh name="NXP-HGD-CF" file="NXP-HGD-CF.stl" />
+    <mesh name="1345_prop_ccw" file="1345_prop_ccw.stl" scale="0.846154 0.846154 0.846154" />
+    <mesh name="5010Bell" file="5010Bell.stl" />
+    <mesh name="1345_prop_cw" file="1345_prop_cw.stl" scale="0.846154 0.846154 0.846154" />
+    <mesh name="x500_frame" file="NXP-HGD-CF.stl" />
+    <mesh name="x500_motor_base" file="5010Base.stl" />
+    <mesh name="x500_motor_bell" file="5010Bell.stl" />
+    <mesh name="x500_prop_ccw_vis" file="1345_prop_ccw_centered.stl" scale="0.846153846 0.846153846 0.846153846" />
+    <mesh name="x500_prop_cw_vis" file="1345_prop_cw_centered.stl" scale="0.846153846 0.846153846 0.846153846" />
+    <texture name="x500_nxp_tex" type="2d" file="nxp.png" />
+    <texture name="x500_rd_tex" type="2d" file="rd.png" />
+    <material name="x500_nxp_mat" rgba="1 1 1 1" texture="x500_nxp_tex" />
+    <material name="x500_rd_mat" rgba="1 1 1 1" texture="x500_rd_tex" />
+    <material name="darkgrey_mat" rgba="0.24 0.24 0.24 1" />
+  </asset>
+  <worldbody>
+    <body name="base_link" pos="0 0 0.277">
+      <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="2" diaginertia="0.04 0.0216667 0.0216667" />
+      <joint name="floating_base_joint" type="free" />
+      <geom type="mesh" mesh="x500_frame" pos="0 0 0.025" quat="6.123234e-17 0 0 1" rgba="0.95 0.95 0.95 1" group="1" contype="0" conaffinity="0" />
+      <geom type="mesh" mesh="x500_motor_base" pos="0.174 0.174 0.032" quat="0.974794107 0 0 -0.223106362" rgba="0.25 0.25 0.25 1" group="1" contype="0" conaffinity="0" />
+      <geom type="mesh" mesh="x500_motor_base" pos="-0.174 0.174 0.032" quat="0.974794107 0 0 -0.223106362" rgba="0.25 0.25 0.25 1" group="1" contype="0" conaffinity="0" />
+      <geom type="mesh" mesh="x500_motor_base" pos="0.174 -0.174 0.032" quat="0.974794107 0 0 -0.223106362" rgba="0.25 0.25 0.25 1" group="1" contype="0" conaffinity="0" />
+      <geom type="mesh" mesh="x500_motor_base" pos="-0.174 -0.174 0.032" quat="0.974794107 0 0 -0.223106362" rgba="0.25 0.25 0.25 1" group="1" contype="0" conaffinity="0" />
+      <geom type="box" material="x500_nxp_mat" size="0.0065 0.0035 0.00025" pos="0.047 0.001 0.043" quat="0.62079161 0.339140002 0.338870043 0.620297453" group="1" contype="0" conaffinity="0" />
+      <geom type="box" material="x500_nxp_mat" size="0.0065 0.0035 0.00025" pos="-0.023 0 0.0515" quat="0.707388269 0 0 -0.706825181" group="1" contype="0" conaffinity="0" />
+      <geom type="box" material="x500_rd_mat" size="0.016 0.0017 0.00025" pos="-0.03 0 0.0515" quat="0.707388269 0 0 -0.706825181" group="1" contype="0" conaffinity="0" />
+      <geom type="mesh" mesh="x500_motor_bell" pos="0.174 -0.174 0.028" rgba="0.15 0.15 0.15 1" group="1" contype="0" conaffinity="0" />
+      <geom type="mesh" mesh="x500_motor_bell" pos="-0.174 0.174 0.028" rgba="0.15 0.15 0.15 1" group="1" contype="0" conaffinity="0" />
+      <geom type="mesh" mesh="x500_motor_bell" pos="0.174 0.174 0.028" rgba="0.15 0.15 0.15 1" group="1" contype="0" conaffinity="0" />
+      <geom type="mesh" mesh="x500_motor_bell" pos="-0.174 -0.174 0.028" rgba="0.15 0.15 0.15 1" group="1" contype="0" conaffinity="0" />
+      <geom name="base_collision_0" type="box" size="0.176776695 0.176776695 0.025" pos="0 0 0.007" quat="1 0 0 0" group="3" contype="1" conaffinity="1" />
+      <geom name="base_collision_1" type="box" size="0.0075 0.0075 0.105" pos="0 -0.098 -0.123" quat="0.984726539 -0.174108138 0 0" group="3" contype="1" conaffinity="1" />
+      <geom name="base_collision_2" type="box" size="0.0075 0.0075 0.105" pos="0 0.098 -0.123" quat="0.984726539 0.174108138 0 0" group="3" contype="1" conaffinity="1" />
+      <geom name="base_collision_3" type="box" size="0.125 0.0075 0.0075" pos="0 -0.132 -0.2195" quat="1 0 0 0" group="3" contype="1" conaffinity="1" />
+      <geom name="base_collision_4" type="box" size="0.125 0.0075 0.0075" pos="0 0.132 -0.2195" quat="1 0 0 0" group="3" contype="1" conaffinity="1" />
+      <body name="rotor_1" pos="0.174 -0.174 0.06">
+        <geom type="box" size="0.139615385 0.00846153846 0.000423076923" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust1" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_2" pos="-0.174 0.174 0.06">
+        <geom type="box" size="0.139615385 0.00846153846 0.000423076923" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust2" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_3" pos="0.174 0.174 0.06">
+        <geom type="box" size="0.139615385 0.00846153846 0.000423076923" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust3" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_4" pos="-0.174 -0.174 0.06">
+        <geom type="box" size="0.139615385 0.00846153846 0.000423076923" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust4" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <site name="base_link_origin" type="sphere" size="0.01" pos="0 0 0" rgba="1 0 0 0.5" />
+      <site name="rotor_offset_1" type="sphere" size="0.005" pos="0.174000 -0.174000 0.060000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_2" type="sphere" size="0.005" pos="-0.174000 0.174000 0.060000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_3" type="sphere" size="0.005" pos="0.174000 0.174000 0.060000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_4" type="sphere" size="0.005" pos="-0.174000 -0.174000 0.060000" rgba="0 0 1 0.5" />
+    </body>
+    <body name="rotor_1_vis" mocap="true">
+      <geom type="mesh" mesh="x500_prop_ccw_vis" rgba="0.2 0.2 0.2 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_2_vis" mocap="true">
+      <geom type="mesh" mesh="x500_prop_ccw_vis" rgba="0.2 0.2 0.2 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_3_vis" mocap="true">
+      <geom type="mesh" mesh="x500_prop_cw_vis" rgba="0.2 0.2 0.2 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_4_vis" mocap="true">
+      <geom type="mesh" mesh="x500_prop_cw_vis" rgba="0.2 0.2 0.2 1" group="1" contype="0" conaffinity="0" />
+    </body>
+  </worldbody>
+  <actuator>
+    </actuator>
+  <sensor>
+    <framepos name="framepos" objtype="site" objname="base_link_origin" />
+    <framequat name="framequat" objtype="site" objname="base_link_origin" />
+    <framelinvel name="framelinvel" objtype="site" objname="base_link_origin" />
+    <gyro name="gyro" site="base_link_origin" />
+    <accelerometer name="accelerometer" site="base_link_origin" />
+    <magnetometer name="magnetometer" site="base_link_origin" />
+  </sensor>
+  <keyframe>
+    <key name="home" qpos="0 0 0.277 1 0 0 0" />
+  </keyframe>
+  <contact>
+    <exclude body1="base_link" body2="rotor_1" />
+    <exclude body1="base_link" body2="rotor_2" />
+    <exclude body1="rotor_2" body2="rotor_1" />
+    <exclude body1="base_link" body2="rotor_3" />
+    <exclude body1="rotor_3" body2="rotor_1" />
+    <exclude body1="rotor_3" body2="rotor_2" />
+    <exclude body1="base_link" body2="rotor_4" />
+    <exclude body1="rotor_4" body2="rotor_1" />
+    <exclude body1="rotor_4" body2="rotor_2" />
+    <exclude body1="rotor_4" body2="rotor_3" />
+  </contact>
+</mujoco>

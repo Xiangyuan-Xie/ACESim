@@ -1,0 +1,82 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="iris">
+  <compiler angle="radian" meshdir="meshes/" texturedir="meshes/" />
+  <option density="1.225" timestep="0.001" integrator="implicit" viscosity="1.8e-5" cone="elliptic" impratio="10" magnetic="2.73e-5 0 -4.54e-5" />
+  <size njmax="500" nconmax="100" />
+  <asset>
+    <mesh name="iris" file="iris.stl" />
+    <mesh name="iris_prop_ccw" file="iris_prop_ccw.stl" />
+    <mesh name="iris_prop_cw" file="iris_prop_cw.stl" />
+    <mesh name="iris_body_vis" file="iris.stl" />
+    <mesh name="iris_prop_ccw_vis" file="iris_prop_ccw.stl" />
+    <mesh name="iris_prop_cw_vis" file="iris_prop_cw.stl" />
+    <material name="gazebo_darkgrey_mat" rgba="0.24 0.24 0.24 1" />
+    <material name="gazebo_blue_mat" rgba="0.2 0.35 0.85 1" />
+  </asset>
+  <worldbody>
+    <body name="base_link" pos="0 0 0.105">
+      <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="1.5" diaginertia="0.055225 0.029125 0.029125" />
+      <joint name="floating_base_joint" type="free" />
+      <geom type="mesh" mesh="iris_body_vis" material="gazebo_darkgrey_mat" group="1" contype="0" conaffinity="0" />
+      <geom type="box" size="0.235 0.235 0.055" group="3" contype="1" conaffinity="1" />
+      <body name="rotor_1" pos="0.13 -0.22 0.023">
+        <geom type="cylinder" size="0.128 0.0025" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust1" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_2" pos="-0.13 0.2 0.023">
+        <geom type="cylinder" size="0.128 0.0025" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust2" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_3" pos="0.13 0.22 0.023">
+        <geom type="cylinder" size="0.128 0.0025" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust3" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_4" pos="-0.13 -0.2 0.023">
+        <geom type="cylinder" size="0.128 0.0025" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust4" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <site name="base_link_origin" type="sphere" size="0.01" pos="0 0 0" rgba="1 0 0 0.5" />
+      <site name="rotor_offset_1" type="sphere" size="0.005" pos="0.130000 -0.220000 0.023000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_2" type="sphere" size="0.005" pos="-0.130000 0.200000 0.023000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_3" type="sphere" size="0.005" pos="0.130000 0.220000 0.023000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_4" type="sphere" size="0.005" pos="-0.130000 -0.200000 0.023000" rgba="0 0 1 0.5" />
+    </body>
+    <body name="rotor_1_vis" mocap="true">
+      <geom type="mesh" mesh="iris_prop_ccw_vis" rgba="0.2 0.35 0.85 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_2_vis" mocap="true">
+      <geom type="mesh" mesh="iris_prop_ccw_vis" rgba="0.24 0.24 0.24 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_3_vis" mocap="true">
+      <geom type="mesh" mesh="iris_prop_cw_vis" rgba="0.2 0.35 0.85 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_4_vis" mocap="true">
+      <geom type="mesh" mesh="iris_prop_cw_vis" rgba="0.24 0.24 0.24 1" group="1" contype="0" conaffinity="0" />
+    </body>
+  </worldbody>
+  <actuator>
+    </actuator>
+  <sensor>
+    <framepos name="framepos" objtype="site" objname="base_link_origin" />
+    <framequat name="framequat" objtype="site" objname="base_link_origin" />
+    <framelinvel name="framelinvel" objtype="site" objname="base_link_origin" />
+    <gyro name="gyro" site="base_link_origin" />
+    <accelerometer name="accelerometer" site="base_link_origin" />
+    <magnetometer name="magnetometer" site="base_link_origin" />
+  </sensor>
+  <keyframe>
+    <key name="home" qpos="0 0 0.105 1 0 0 0" />
+  </keyframe>
+  <contact>
+    <exclude body1="base_link" body2="rotor_1" />
+    <exclude body1="base_link" body2="rotor_2" />
+    <exclude body1="rotor_2" body2="rotor_1" />
+    <exclude body1="base_link" body2="rotor_3" />
+    <exclude body1="rotor_3" body2="rotor_1" />
+    <exclude body1="rotor_3" body2="rotor_2" />
+    <exclude body1="base_link" body2="rotor_4" />
+    <exclude body1="rotor_4" body2="rotor_1" />
+    <exclude body1="rotor_4" body2="rotor_2" />
+    <exclude body1="rotor_4" body2="rotor_3" />
+  </contact>
+</mujoco>

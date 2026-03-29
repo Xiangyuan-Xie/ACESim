@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="typhoon_h480">
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0.001005 0 -0.0090035" rpy="0 0 0" />
+      <mass value="2.02" />
+      <inertia ixx="0.011" ixy="0" ixz="0" iyy="0.015" iyz="0" izz="0.021" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 3.141592" />
+      <geometry>
+        <mesh filename="package://typhoon_h480/meshes/main_body_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://typhoon_h480/meshes/leg2_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://typhoon_h480/meshes/leg1_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.67 0.67 0.15" />
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="rotor_1">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.005" />
+      <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.211396 -0.119762 -0.082219" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://typhoon_h480/meshes/prop_ccw_assembly_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.128" length="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rotor_joint_1" type="continuous">
+    <origin xyz="-0.00187896 -0.242705 0.0822169" rpy="0 0 -2.09439510239" />
+    <parent link="base_link" />
+    <child link="rotor_1" />
+    <axis xyz="0 0 1" />
+    <limit effort="0.2" velocity="1500.0" />
+  </joint>
+
+  <link name="rotor_2">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.005" />
+      <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004" />
+    </inertial>
+    <visual>
+      <origin xyz="0.00187896 -0.242705 -0.0822169" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://typhoon_h480/meshes/prop_cw_assembly_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.128" length="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rotor_joint_2" type="continuous">
+    <origin xyz="-0.00187896 0.242705 0.0822169" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rotor_2" />
+    <axis xyz="0 0 1" />
+    <limit effort="0.2" velocity="1500.0" />
+  </joint>
+
+  <link name="rotor_3">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.005" />
+      <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.211396 -0.119762 -0.082219" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://typhoon_h480/meshes/prop_ccw_assembly_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.128" length="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rotor_joint_3" type="continuous">
+    <origin xyz="0.211396 0.119762 0.082219" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rotor_3" />
+    <axis xyz="0 0 1" />
+    <limit effort="0.2" velocity="1500.0" />
+  </joint>
+
+  <link name="rotor_4">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.005" />
+      <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004" />
+    </inertial>
+    <visual>
+      <origin xyz="0.00187896 -0.242705 -0.0822169" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://typhoon_h480/meshes/prop_cw_assembly_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.128" length="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rotor_joint_4" type="continuous">
+    <origin xyz="-0.209396 -0.122762 0.082219" rpy="0 0 2.09439510239" />
+    <parent link="base_link" />
+    <child link="rotor_4" />
+    <axis xyz="0 0 1" />
+    <limit effort="0.2" velocity="1500.0" />
+  </joint>
+
+  <link name="rotor_5">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.005" />
+      <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004" />
+    </inertial>
+    <visual>
+      <origin xyz="0.00187896 -0.242705 -0.0822169" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://typhoon_h480/meshes/prop_cw_assembly_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.128" length="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rotor_joint_5" type="continuous">
+    <origin xyz="0.211396 -0.119762 0.082219" rpy="0 0 -2.09439510239" />
+    <parent link="base_link" />
+    <child link="rotor_5" />
+    <axis xyz="0 0 1" />
+    <limit effort="0.2" velocity="1500.0" />
+  </joint>
+
+  <link name="rotor_6">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.005" />
+      <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000273104" iyz="0" izz="0.000274004" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.211396 -0.119762 -0.082219" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://typhoon_h480/meshes/prop_ccw_assembly_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <cylinder radius="0.128" length="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rotor_joint_6" type="continuous">
+    <origin xyz="-0.209396 0.122762 0.082219" rpy="0 0 2.09439510239" />
+    <parent link="base_link" />
+    <child link="rotor_6" />
+    <axis xyz="0 0 1" />
+    <limit effort="0.2" velocity="1500.0" />
+  </joint>
+</robot>

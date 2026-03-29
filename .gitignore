@@ -183,3 +183,6 @@ image/
 
 # vscode
 .vscode/
+
+# codex
+.codex

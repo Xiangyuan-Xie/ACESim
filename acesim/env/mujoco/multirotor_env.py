@@ -74,6 +74,10 @@ class MultirotorEnv(MujocoEnv):
             self.read_sensor_sample,
         )
         self._rotor_offsets = self._load_rotor_offsets()
+        rounded_offsets = {tuple(np.round(offset, decimals=6)) for offset in self._rotor_offsets}
+        assert len(rounded_offsets) == len(
+            self._rotor_offsets
+        ), "Rotor offsets must be unique; duplicate rotor visual/body mapping detected."
         self._rotor_count = len(self._rotor_body_ids)
         self._desired_rotor_angular_velocity = np.zeros(self._rotor_count)
         self._rotor_angular_velocity = np.zeros(self._rotor_count)

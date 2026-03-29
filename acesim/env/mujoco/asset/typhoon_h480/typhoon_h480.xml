@@ -1,0 +1,132 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="typhoon_h480">
+  <compiler angle="radian" meshdir="meshes/" texturedir="meshes/" />
+  <option density="1.225" timestep="0.001" integrator="implicit" viscosity="1.8e-5" cone="elliptic" impratio="10" magnetic="2.73e-5 0 -4.54e-5" />
+  <size njmax="500" nconmax="100" />
+  <asset>
+    <mesh name="main_body_remeshed_v3" file="main_body_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+    <mesh name="leg2_remeshed_v3" file="leg2_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+    <mesh name="leg1_remeshed_v3" file="leg1_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+    <mesh name="prop_ccw_assembly_remeshed_v3" file="prop_ccw_assembly_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+    <mesh name="prop_cw_assembly_remeshed_v3" file="prop_cw_assembly_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_body_vis" file="main_body_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_leg_left_vis" file="leg2_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_leg_right_vis" file="leg1_remeshed_v3.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_mount_vis" file="cgo3_mount_remeshed_v1.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_varm_vis" file="cgo3_vertical_arm_remeshed_v1.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_harm_vis" file="cgo3_horizontal_arm_remeshed_v1.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_camera_vis" file="cgo3_camera_remeshed_v1.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_rotor_vis_1" file="rotor_1_vis.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_rotor_vis_2" file="rotor_2_vis.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_rotor_vis_3" file="rotor_3_vis.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_rotor_vis_4" file="rotor_4_vis.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_rotor_vis_5" file="rotor_5_vis.stl" scale="0.001 0.001 0.001" />
+    <mesh name="typhoon_rotor_vis_6" file="rotor_6_vis.stl" scale="0.001 0.001 0.001" />
+    <material name="typhoon_darkgrey_mat" rgba="0.24 0.24 0.24 1" />
+    <material name="typhoon_blue_mat" rgba="0.2 0.35 0.85 1" />
+  </asset>
+  <worldbody>
+    <body name="base_link" pos="0 0 0.269740928">
+      <inertial pos="0.001005 0 -0.0090035" quat="0 0.707107 0 0.707107" mass="2.02" diaginertia="0.021 0.015 0.011" />
+      <joint name="floating_base_joint" type="free" />
+      <geom type="mesh" mesh="typhoon_body_vis" material="typhoon_darkgrey_mat" quat="6.123234e-17 0 0 1" group="1" contype="0" conaffinity="0" />
+      <geom name="base_link_collision" type="box" size="0.335 0.335 0.075" group="3" contype="1" conaffinity="1" />
+      <geom name="left_leg_visual" type="mesh" mesh="typhoon_leg_left_vis" material="typhoon_darkgrey_mat" group="1" contype="0" conaffinity="0" />
+      <geom name="left_leg_collision" type="cylinder" size="0.012209 0.15" pos="-0.005 -0.14314 -0.207252" quat="0.707766319 0 0.706446627 0" group="3" contype="1" conaffinity="1" />
+      <geom name="left_leg_collision_bar" type="cylinder" size="0.00914984 0.0884465" pos="0.00052 -0.08503 -0.121187" quat="0.968749172 -0.248042419 0 0" group="3" contype="1" conaffinity="1" />
+      <geom name="right_leg_visual" type="mesh" mesh="typhoon_leg_right_vis" material="typhoon_darkgrey_mat" group="1" contype="0" conaffinity="0" />
+      <geom name="right_leg_collision" type="cylinder" size="0.012209 0.15" pos="-0.005 0.14314 -0.207252" quat="0.707766319 0 0.706446627 0" group="3" contype="1" conaffinity="1" />
+      <geom name="right_leg_collision_bar" type="cylinder" size="0.00914984 0.0884465" pos="0.00052 0.08503 -0.121187" quat="0.968749172 0.248042419 0 0" group="3" contype="1" conaffinity="1" />
+      <geom name="cgo3_mount_visual" type="mesh" mesh="typhoon_mount_vis" material="typhoon_darkgrey_mat" group="1" contype="0" conaffinity="0" />
+      <geom name="cgo3_vertical_arm_visual" type="mesh" mesh="typhoon_varm_vis" material="typhoon_darkgrey_mat" group="1" contype="0" conaffinity="0" />
+      <geom name="cgo3_horizontal_arm_visual" type="mesh" mesh="typhoon_harm_vis" material="typhoon_darkgrey_mat" group="1" contype="0" conaffinity="0" />
+      <geom name="cgo3_camera_visual" type="mesh" mesh="typhoon_camera_vis" material="typhoon_darkgrey_mat" group="1" contype="0" conaffinity="0" />
+      <geom name="cgo3_camera_collision" type="sphere" size="0.035" pos="-0.0418142414 -0.0015 -0.164118858" group="3" contype="1" conaffinity="1" />
+      <body name="rotor_1" pos="-0.00187896 -0.242705 0.0822169">
+        <geom name="rotor_1_collision" type="cylinder" size="0.128 0.0025" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust1" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_2" pos="-0.00187896 0.242705 0.0822169">
+        <geom name="rotor_2_collision" type="cylinder" size="0.128 0.0025" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust2" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_3" pos="0.211396 0.119762 0.082219">
+        <geom name="rotor_3_collision" type="cylinder" size="0.128 0.0025" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust3" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_4" pos="-0.209396 -0.122762 0.082219">
+        <geom name="rotor_4_collision" type="cylinder" size="0.128 0.0025" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust4" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_5" pos="0.211396 -0.119762 0.082219">
+        <geom name="rotor_5_collision" type="cylinder" size="0.128 0.0025" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust5" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_6" pos="-0.209396 0.122762 0.082219">
+        <geom name="rotor_6_collision" type="cylinder" size="0.128 0.0025" group="3" contype="1" conaffinity="1" />
+        <site name="rotor_joint_thrust6" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
+      </body>
+      <site name="base_link_origin" type="sphere" size="0.01" pos="0 0 0" rgba="1 0 0 0.5" />
+      <site name="rotor_offset_1" type="sphere" size="0.005" pos="-0.001879 -0.242705 0.082217" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_2" type="sphere" size="0.005" pos="-0.001879 0.242705 0.082217" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_3" type="sphere" size="0.005" pos="0.211396 0.119762 0.082219" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_4" type="sphere" size="0.005" pos="-0.209396 -0.122762 0.082219" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_5" type="sphere" size="0.005" pos="0.211396 -0.119762 0.082219" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_6" type="sphere" size="0.005" pos="-0.209396 0.122762 0.082219" rgba="0 0 1 0.5" />
+    </body>
+    <body name="rotor_1_vis" mocap="true">
+      <geom type="mesh" mesh="typhoon_rotor_vis_1" quat="0.5 0 0 -0.866025404" rgba="0.2 0.35 0.85 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_2_vis" mocap="true">
+      <geom type="mesh" mesh="typhoon_rotor_vis_2" quat="1 0 0 0" rgba="0.24 0.24 0.24 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_3_vis" mocap="true">
+      <geom type="mesh" mesh="typhoon_rotor_vis_3" quat="1 0 0 0" rgba="0.2 0.35 0.85 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_4_vis" mocap="true">
+      <geom type="mesh" mesh="typhoon_rotor_vis_4" quat="0.5 0 0 0.866025404" rgba="0.24 0.24 0.24 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_5_vis" mocap="true">
+      <geom type="mesh" mesh="typhoon_rotor_vis_5" quat="0.5 0 0 -0.866025404" rgba="0.24 0.24 0.24 1" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_6_vis" mocap="true">
+      <geom type="mesh" mesh="typhoon_rotor_vis_6" quat="0.5 0 0 0.866025404" rgba="0.2 0.35 0.85 1" group="1" contype="0" conaffinity="0" />
+    </body>
+  </worldbody>
+  <actuator>
+    </actuator>
+  <sensor>
+    <framepos name="framepos" objtype="site" objname="base_link_origin" />
+    <framequat name="framequat" objtype="site" objname="base_link_origin" />
+    <framelinvel name="framelinvel" objtype="site" objname="base_link_origin" />
+    <gyro name="gyro" site="base_link_origin" />
+    <accelerometer name="accelerometer" site="base_link_origin" />
+    <magnetometer name="magnetometer" site="base_link_origin" />
+  </sensor>
+  <keyframe>
+    <key name="home" qpos="0 0 0.269740928 1 0 0 0" />
+  </keyframe>
+  <contact>
+    <exclude body1="base_link" body2="rotor_1" />
+    <exclude body1="base_link" body2="rotor_2" />
+    <exclude body1="rotor_2" body2="rotor_1" />
+    <exclude body1="base_link" body2="rotor_3" />
+    <exclude body1="rotor_3" body2="rotor_1" />
+    <exclude body1="rotor_3" body2="rotor_2" />
+    <exclude body1="base_link" body2="rotor_4" />
+    <exclude body1="rotor_4" body2="rotor_1" />
+    <exclude body1="rotor_4" body2="rotor_2" />
+    <exclude body1="rotor_4" body2="rotor_3" />
+    <exclude body1="base_link" body2="rotor_5" />
+    <exclude body1="rotor_5" body2="rotor_1" />
+    <exclude body1="rotor_5" body2="rotor_2" />
+    <exclude body1="rotor_5" body2="rotor_3" />
+    <exclude body1="rotor_5" body2="rotor_4" />
+    <exclude body1="base_link" body2="rotor_6" />
+    <exclude body1="rotor_6" body2="rotor_1" />
+    <exclude body1="rotor_6" body2="rotor_2" />
+    <exclude body1="rotor_6" body2="rotor_3" />
+    <exclude body1="rotor_6" body2="rotor_4" />
+    <exclude body1="rotor_6" body2="rotor_5" />
+  </contact>
+</mujoco>

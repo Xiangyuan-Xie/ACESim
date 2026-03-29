@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="x500">
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="2.0" />
+      <inertia ixx="0.02166666666666667" ixy="0" ixz="0" iyy="0.02166666666666667" iyz="0" izz="0.04000000000000001" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.025" rpy="0 0 3.141592654" />
+      <geometry>
+        <mesh filename="package://x500/meshes/NXP-HGD-CF.stl" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.03" rpy="0 0 0" />
+      <geometry>
+        <box size="0.36 0.36 0.12" />
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="rotor_1">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.016076923076923075" />
+      <inertia ixx="3.8464910483993325e-07" ixy="0" ixz="0" iyy="2.6115851691700804e-05" iyz="0" izz="2.649858234714004e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.022 -0.14638461538461536 -0.016" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://x500/meshes/1345_prop_ccw.stl" scale="0.8461538461538461 0.8461538461538461 0.8461538461538461" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0 0 -0.032" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://x500/meshes/5010Bell.stl" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.2792307692307692 0.016923076923076923 0.0008461538461538462" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rotor_joint_1" type="continuous">
+    <origin xyz="0.174 -0.174 0.06" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rotor_1" />
+    <axis xyz="0 0 1" />
+    <limit effort="0.25" velocity="1000.0" />
+  </joint>
+
+  <link name="rotor_2">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.016076923076923075" />
+      <inertia ixx="3.8464910483993325e-07" ixy="0" ixz="0" iyy="2.6115851691700804e-05" iyz="0" izz="2.649858234714004e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.022 -0.14638461538461536 -0.016" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://x500/meshes/1345_prop_ccw.stl" scale="0.8461538461538461 0.8461538461538461 0.8461538461538461" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0 0 -0.032" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://x500/meshes/5010Bell.stl" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.2792307692307692 0.016923076923076923 0.0008461538461538462" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rotor_joint_2" type="continuous">
+    <origin xyz="-0.174 0.174 0.06" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rotor_2" />
+    <axis xyz="0 0 1" />
+    <limit effort="0.25" velocity="1000.0" />
+  </joint>
+
+  <link name="rotor_3">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.016076923076923075" />
+      <inertia ixx="3.8464910483993325e-07" ixy="0" ixz="0" iyy="2.6115851691700804e-05" iyz="0" izz="2.649858234714004e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.022 -0.14638461538461536 -0.016" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://x500/meshes/1345_prop_cw.stl" scale="0.8461538461538461 0.8461538461538461 0.8461538461538461" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0 0 -0.032" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://x500/meshes/5010Bell.stl" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.2792307692307692 0.016923076923076923 0.0008461538461538462" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rotor_joint_3" type="continuous">
+    <origin xyz="0.174 0.174 0.06" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rotor_3" />
+    <axis xyz="0 0 1" />
+    <limit effort="0.25" velocity="1000.0" />
+  </joint>
+
+  <link name="rotor_4">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.016076923076923075" />
+      <inertia ixx="3.8464910483993325e-07" ixy="0" ixz="0" iyy="2.6115851691700804e-05" iyz="0" izz="2.649858234714004e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="-0.022 -0.14638461538461536 -0.016" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://x500/meshes/1345_prop_cw.stl" scale="0.8461538461538461 0.8461538461538461 0.8461538461538461" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0 0 -0.032" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://x500/meshes/5010Bell.stl" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.2792307692307692 0.016923076923076923 0.0008461538461538462" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rotor_joint_4" type="continuous">
+    <origin xyz="-0.174 -0.174 0.06" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rotor_4" />
+    <axis xyz="0 0 1" />
+    <limit effort="0.25" velocity="1000.0" />
+  </joint>
+</robot>

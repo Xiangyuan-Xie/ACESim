@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from launch.actions import ExecuteProcess, RegisterEventHandler, TimerAction
 from launch.event_handlers import OnProcessStart
@@ -49,12 +49,31 @@ def _resolve_hgt_ref_value(hgt_ref: str) -> str:
     return mapping[hgt_ref]
 
 
+def _resolve_px4_startup_env() -> dict[str, str]:
+    """Map the configured ACESim asset onto the PX4 airframe startup environment."""
+    asset_name = ConfigLoader().get_asset_name()
+
+    if asset_name == "iris" or asset_name == "x500":
+        return {
+            "PX4_SYS_AUTOSTART": "10016",
+            "PX4_SIM_MODEL": "none",
+        }
+
+    if asset_name == "typhoon_h480":
+        return {
+            "PX4_SYS_AUTOSTART": "6011",
+            "PX4_SIM_MODEL": "none",
+        }
+
+    raise ValueError(f"Unsupported PX4 startup asset: {asset_name}")
+
+
 def build_px4_additional_env() -> dict[str, str]:
     sensor_params = PX4SensorParams.from_asset_params(
         ConfigLoader().get_asset_params(),
         dynamic_hil_sensor_fields=False,
     )
-    additional_env = {"PX4_SIM_MODEL": "none_iris"}
+    additional_env = _resolve_px4_startup_env()
     if sensor_params.fusion_mode == "hil":
         additional_env.update(
             {
@@ -91,7 +110,14 @@ def build_px4_additional_env() -> dict[str, str]:
     return additional_env
 
 
-def build_linux_launch_entities(px4_repo_path: str, *, play_executable: str = "acesim_play"):
+def build_launch_entities(
+    px4_repo_path: str,
+    *,
+    bridge_mode: Literal["linux", "wsl"] = "linux",
+    play_executable: Optional[str] = "acesim_play",
+    enable_px4_post_start_setup: bool = True,
+    play_start_delay_sec: float = 2.0,
+):
     micro_xrce_agent = ExecuteProcess(
         cmd=["MicroXRCEAgent", "udp4", "-p", "8888"],
         output="screen",
@@ -127,31 +153,39 @@ def build_linux_launch_entities(px4_repo_path: str, *, play_executable: str = "a
     clock_bridge = Node(
         package="acesim_ros2",
         executable="simulation_clock_zmq_bridge",
-        arguments=["--mode", "linux"],
+        arguments=["--mode", bridge_mode],
         output="screen",
     )
     arm_state_bridge = Node(
         package="acesim_ros2",
         executable="arm_state_zmq_bridge",
-        arguments=["--mode", "linux"],
+        arguments=["--mode", bridge_mode],
         output="screen",
     )
-    acesim_play = Node(
-        package="acesim_ros2",
-        executable=play_executable,
-        output="screen",
-    )
-    return [
+    entities = [
         micro_xrce_agent,
         px4_sitl,
-        px4_post_start_setup,
         arm_command_joint_state_pub,
         clock_bridge,
         arm_state_bridge,
-        RegisterEventHandler(
-            OnProcessStart(
-                target_action=px4_post_start_setup,
-                on_start=[TimerAction(period=2.0, actions=[acesim_play])],
-            )
-        ),
     ]
+
+    if enable_px4_post_start_setup:
+        entities.append(px4_post_start_setup)
+
+    if enable_px4_post_start_setup and play_executable:
+        acesim_play = Node(
+            package="acesim_ros2",
+            executable=play_executable,
+            output="screen",
+        )
+        entities.append(
+            RegisterEventHandler(
+                OnProcessStart(
+                    target_action=px4_post_start_setup,
+                    on_start=[TimerAction(period=play_start_delay_sec, actions=[acesim_play])],
+                )
+            )
+        )
+
+    return entities

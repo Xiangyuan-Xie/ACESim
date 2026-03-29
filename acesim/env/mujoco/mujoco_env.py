@@ -34,6 +34,7 @@ class MujocoEnv(BaseEnv):
             mujoco.mj_resetDataKeyframe(self._mj_model, self._mj_data, 0)
         else:
             mujoco.mj_resetData(self._mj_model, self._mj_data)
+        mujoco.mj_forward(self._mj_model, self._mj_data)
         mujoco.set_mjcb_control(self._control)
 
         self._sim_clock = SimulationClock()

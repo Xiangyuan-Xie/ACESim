@@ -1,0 +1,36 @@
+[params]
+rotor_direction = [1.0, 1.0, -1.0, -1.0]
+motor_constant = 8.54858e-06
+moment_constant = 0.016
+rotor_drag_coeff = 8.06428e-05
+rolling_moment_coeff = 1e-06
+time_constant_up = 0.0125
+time_constant_down = 0.025
+max_rot_velocity = 1000.0
+max_relative_airspeed_mps = 25.0
+motor_cmd_rate_hz = 200.0
+motor_exec_delay_ms_range = [2.0, 10.0]
+rotor_radius = 0.1396153846153846
+
+[params.px4_fusion]
+mode = "mocap"
+
+[params.px4_fusion.hil]
+hil_sensor_rate_hz = 250.0
+mag_rate_hz = 84.0
+baro_rate_hz = 42.0
+gps_rate_hz = 5.0
+
+[params.px4_fusion.mocap]
+hil_sensor_rate_hz = 250.0
+vision_rate_hz = 100.0
+ekf2_ev_ctrl = 11
+ekf2_hgt_ref = "Vision"
+ekf2_ev_delay_ms = 0.0
+ekf2_ev_pos_body_m = [0.0, 0.0, 0.0]
+ekf2_ev_noise_md = 1
+ekf2_evp_noise = 0.003
+ekf2_evv_noise = 0.01
+ekf2_eva_noise = 0.01
+ekf2_gps_ctrl = 0
+ekf2_mag_type = 0
