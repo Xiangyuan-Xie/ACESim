@@ -1,13 +1,13 @@
-"""Genesis multirotor environment extended with the manipulator control stack."""
+"""Genesis multicopter environment extended with the manipulator control stack."""
 
 from acetele.core.make_robot import make_robot
 
 from acesim.config.config_loader import ConfigLoader
-from acesim.env.genesis.multirotor_env import MultirotorEnv
+from acesim.env.genesis.mc_env import MCEnv
 
 
-class MCArmEnv(MultirotorEnv):
-    """Genesis multirotor environment with an attached arm control agent."""
+class MCArmEnv(MCEnv):
+    """Genesis multicopter environment with an attached arm control agent."""
 
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
@@ -44,7 +44,7 @@ class MCArmEnv(MultirotorEnv):
         self._control_dofs_position(joint_pos[:count], self._arm_dofs_idx_local[:count])
 
     def _update_custom_control(self):
-        """Extend the multirotor control hook with manipulator actuation."""
+        """Extend the multicopter control hook with manipulator actuation."""
 
         self._ensure_arm_dofs()
         self._update_arm_control()

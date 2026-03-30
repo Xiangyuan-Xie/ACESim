@@ -10,16 +10,57 @@ their own rates.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, TypeAlias
+from typing import Callable, Protocol, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
 
 from acesim.utils.frame import world_nwu_to_ned
-from acesim.utils.px4_transport import PX4SensorParams, PX4Transport
+from acesim.utils.px4_transport import PX4SensorParams
 from acesim.utils.simulation_clock import SimulationClock
 
 FloatArray: TypeAlias = NDArray[np.float64]
+
+
+class PX4TransportLike(Protocol):
+    HIL_SENSOR_FIELDS_ACCEL: int
+    HIL_SENSOR_FIELDS_GYRO: int
+    HIL_SENSOR_FIELDS_MAG: int
+    HIL_SENSOR_FIELDS_DIFF_PRESS: int
+    HIL_SENSOR_FIELDS_BARO: int
+
+    def send_hil_sensor(
+        self,
+        timestamp_us: int,
+        accel_frd: FloatArray,
+        gyro_frd: FloatArray,
+        mag_frd: FloatArray,
+        altitude_m: float,
+        diff_pressure_hpa: float = 0.0,
+        temperature_celsius: float = 25.0,
+        fields_updated: int = 0,
+    ) -> None: ...
+
+    def send_hil_gps(
+        self,
+        timestamp_us: int,
+        latitude_e7: int,
+        longitude_e7: int,
+        altitude_mm: int,
+        ground_speed_cm_s: int,
+        velocity_north_cm_s: int,
+        velocity_east_cm_s: int,
+        velocity_down_cm_s: int,
+        course_over_ground_cdeg: int,
+        satellites_visible: int = 10,
+    ) -> None: ...
+
+    def send_vision_position_estimate(
+        self,
+        timestamp_us: int,
+        position_world_m: FloatArray,
+        attitude_world_quat: FloatArray,
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -37,6 +78,8 @@ class PX4SensorSample:
     position_world_m: FloatArray
     velocity_world_mps: FloatArray
     attitude_world_quat: FloatArray
+    diff_pressure_hpa: float | None = None
+    temperature_celsius: float = 25.0
 
 
 class PX4SensorScheduler:
@@ -50,13 +93,13 @@ class PX4SensorScheduler:
 
     def __init__(
         self,
-        px4_transport: PX4Transport,
+        px4_transport: PX4TransportLike,
         clock: SimulationClock,
         params: PX4SensorParams,
         read_sensor_sample: Callable[[], PX4SensorSample],
         reset_sensor_state: Callable[[], None] | None = None,
     ) -> None:
-        self._px4_transport: PX4Transport = px4_transport
+        self._px4_transport: PX4TransportLike = px4_transport
         self._clock: SimulationClock = clock
         self._params: PX4SensorParams = params
         self._read_sensor_sample: Callable[[], PX4SensorSample] = read_sensor_sample
@@ -77,6 +120,8 @@ class PX4SensorScheduler:
         self._last_gyro_frd: FloatArray = np.zeros(3, dtype=float)
         self._last_mag_frd: FloatArray = np.zeros(3, dtype=float)
         self._last_baro_altitude_m: float = float(self._params.gps_alt_start)
+        self._last_diff_pressure_hpa: float = 0.0
+        self._last_temperature_celsius: float = 25.0
         self._mag_pending: bool = False
         self._baro_pending: bool = False
 
@@ -125,6 +170,8 @@ class PX4SensorScheduler:
         self._last_gyro_frd = gyro_frd.copy()
         self._last_mag_frd = mag_frd.copy()
         self._last_baro_altitude_m = float(self._params.gps_alt_start + position_world_m[2])
+        self._last_diff_pressure_hpa = float(sample.diff_pressure_hpa or 0.0)
+        self._last_temperature_celsius = float(sample.temperature_celsius)
         self._mag_pending = self._params.send_mag
         self._baro_pending = self._params.send_baro
 
@@ -147,6 +194,8 @@ class PX4SensorScheduler:
         position_world_m = np.asarray(sample.position_world_m, dtype=float)
         velocity_world_mps = np.asarray(sample.velocity_world_mps, dtype=float)
         attitude_world_quat = np.asarray(sample.attitude_world_quat, dtype=float)
+        diff_pressure_hpa = 0.0 if sample.diff_pressure_hpa is None else float(sample.diff_pressure_hpa)
+        temperature_celsius = float(sample.temperature_celsius)
         if accel_frd.ndim != 1:
             raise ValueError("accel_frd must be a flat 1D array")
         if gyro_frd.ndim != 1:
@@ -193,9 +242,13 @@ class PX4SensorScheduler:
         if hil_due:
             self._last_accel_frd = accel_frd + np.random.normal(0.0, self._params.accel_noise_std_mps2)
             self._last_gyro_frd = gyro_frd + np.random.normal(0.0, self._params.gyro_noise_std_radps, size=3)
+            self._last_diff_pressure_hpa = diff_pressure_hpa
+            self._last_temperature_celsius = temperature_celsius
             fields = self._px4_transport.HIL_SENSOR_FIELDS_ACCEL | self._px4_transport.HIL_SENSOR_FIELDS_GYRO
             if self._params.send_mag and self._mag_pending:
                 fields |= self._px4_transport.HIL_SENSOR_FIELDS_MAG
+            if sample.diff_pressure_hpa is not None:
+                fields |= self._px4_transport.HIL_SENSOR_FIELDS_DIFF_PRESS
             if self._params.send_baro and self._baro_pending:
                 fields |= self._px4_transport.HIL_SENSOR_FIELDS_BARO
             self._px4_transport.send_hil_sensor(
@@ -204,6 +257,8 @@ class PX4SensorScheduler:
                 self._last_gyro_frd,
                 self._last_mag_frd,
                 self._last_baro_altitude_m,
+                diff_pressure_hpa=self._last_diff_pressure_hpa,
+                temperature_celsius=self._last_temperature_celsius,
                 fields_updated=fields,
             )
             self._mag_pending = False

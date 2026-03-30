@@ -2,6 +2,7 @@ import math
 import re
 import textwrap
 import xml.etree.ElementTree as ET
+from copy import deepcopy
 from pathlib import Path
 
 import mujoco
@@ -24,7 +25,18 @@ XML_OPTION_TAG = textwrap.dedent("""
     />
     """).strip()
 
-XML_ACTUATORS_SENSORS = textwrap.dedent("""
+XML_SENSOR_BLOCK = textwrap.dedent("""
+    <sensor>
+        <framepos name="framepos" objtype="site" objname="base_link_origin" />
+        <framequat name="framequat" objtype="site" objname="base_link_origin" />
+        <framelinvel name="framelinvel" objtype="site" objname="base_link_origin" />
+        <gyro name="gyro" site="base_link_origin" />
+        <accelerometer name="accelerometer" site="base_link_origin" />
+        <magnetometer name="magnetometer" site="base_link_origin" />
+    </sensor>
+    """).strip()
+
+XML_ARM_ACTUATORS = textwrap.dedent("""
     <actuator>
         <position
             name="joint_1" joint="joint_1" kp="748.6" kv="0.547"
@@ -55,15 +67,24 @@ XML_ACTUATORS_SENSORS = textwrap.dedent("""
             forcerange="-49.06 49.06" ctrlrange="0 0.04225"
         />
     </actuator>
-    <sensor>
-        <framepos name="framepos" objtype="site" objname="base_link_origin" />
-        <framequat name="framequat" objtype="site" objname="base_link_origin" />
-        <framelinvel name="framelinvel" objtype="site" objname="base_link_origin" />
-        <gyro name="gyro" site="base_link_origin" />
-        <accelerometer name="accelerometer" site="base_link_origin" />
-        <magnetometer name="magnetometer" site="base_link_origin" />
-    </sensor>
     """).strip()
+
+PX4_TARGETS = {"plane", "standard_vtol", "uuv_bluerov2_heavy"}
+FIXEDWING_ACTUATOR_SPECS = {
+    "plane": [
+        ("rudder_ctrl", "rudder_joint", 40.0),
+        ("left_flap_ctrl", "left_flap_joint", 40.0),
+        ("right_flap_ctrl", "right_flap_joint", 40.0),
+        ("left_elevon_ctrl", "left_elevon_joint", 40.0),
+        ("right_elevon_ctrl", "right_elevon_joint", 40.0),
+        ("elevator_ctrl", "elevator_joint", 40.0),
+    ],
+    "standard_vtol": [
+        ("left_elevon_ctrl", "left_elevon_joint", 45.0),
+        ("right_elevon_ctrl", "right_elevon_joint", 45.0),
+        ("elevator_ctrl", "elevator_joint", 45.0),
+    ],
+}
 
 
 def euler_to_quat(roll: float, pitch: float, yaw: float) -> list[float]:
@@ -106,6 +127,34 @@ def clear_body(body: ET.Element, *, keep_sites: bool = True) -> None:
         if keep_sites and child.tag == "site":
             continue
         body.remove(child)
+
+
+def ensure_child(root: ET.Element, tag: str) -> ET.Element:
+    child = root.find(tag)
+    if child is None:
+        child = ET.SubElement(root, tag)
+    return child
+
+
+def append_position_actuator(
+    actuator_elem: ET.Element,
+    *,
+    name: str,
+    joint: str,
+    joint_ranges: dict[str, str],
+    kp: float,
+    kv: float = 0.0,
+) -> None:
+    attrib = {
+        "name": name,
+        "joint": joint,
+        "kp": fmt_floats([kp]),
+        "ctrllimited": "true",
+        "ctrlrange": joint_ranges.get(joint, "-0.78 0.78"),
+    }
+    if kv > 0.0:
+        attrib["kv"] = fmt_floats([kv])
+    actuator_elem.append(ET.Element("position", attrib))
 
 
 def rebuild_body_maps(
@@ -200,7 +249,7 @@ def probe_floor_penetration(xml_path: Path) -> float:
 
 
 def calibrate_home_height(root: ET.Element, xml_path: Path, config: ConverterConfig) -> None:
-    if config.target not in {"x500", "iris", "typhoon_h480"}:
+    if config.target not in {"x500", "iris", "typhoon_h480", "plane", "standard_vtol", "uuv_bluerov2_heavy"}:
         return
     keyframe = root.find("keyframe")
     if keyframe is None:
@@ -239,6 +288,7 @@ def postprocess_xml(
     body_parent: dict[str, str | None] = {}
     body_elem: dict[str, ET.Element] = {}
     body_transform: dict[str, dict[str, list[float]]] = {}
+    rotor_visual_center_local: dict[str, list[float]] = {}
 
     if worldbody is not None:
         body_parent, body_elem, body_transform = rebuild_body_maps(worldbody)
@@ -267,6 +317,89 @@ def postprocess_xml(
         inv_base = [base_quat[0], -base_quat[1], -base_quat[2], -base_quat[3]]
         return quat_rotate(inv_base, acc_pos)
 
+    def compose_to_world(body_name: str) -> tuple[list[float], list[float]] | None:
+        path: list[str] = []
+        current: str | None = body_name
+        while current is not None and current in body_parent:
+            path.append(current)
+            current = body_parent[current]
+        if not path:
+            return None
+
+        acc_quat = [1.0, 0.0, 0.0, 0.0]
+        acc_pos = [0.0, 0.0, 0.0]
+        for i in range(len(path) - 1, -1, -1):
+            node = path[i]
+            tf = body_transform.get(node, {"pos": [0.0, 0.0, 0.0], "quat": [1.0, 0.0, 0.0, 0.0]})
+            rotated = quat_rotate(acc_quat, tf["pos"])
+            acc_pos = [acc_pos[0] + rotated[0], acc_pos[1] + rotated[1], acc_pos[2] + rotated[2]]
+            acc_quat = quat_mul(acc_quat, tf["quat"])
+        return acc_pos, acc_quat
+
+    def compose_rotation_to_base(child_name: str, base_name: str = "base_link") -> list[float] | None:
+        path: list[str] = []
+        current: str | None = child_name
+        while current is not None and current in body_parent:
+            path.append(current)
+            current = body_parent[current]
+            if current == base_name:
+                path.append(current)
+                break
+        if not path or path[-1] != base_name:
+            return None
+
+        acc_quat = [1.0, 0.0, 0.0, 0.0]
+        for i in range(len(path) - 1, 0, -1):
+            node = path[i - 1]
+            tf = body_transform.get(node, {"quat": [1.0, 0.0, 0.0, 0.0]})
+            acc_quat = quat_mul(acc_quat, tf["quat"])
+        return acc_quat
+
+    def compose_rotated_offset_to_base(body_name: str, offset_local: list[float]) -> list[float] | None:
+        offset_base = compose_to_base(body_name, "base_link")
+        quat_base = compose_rotation_to_base(body_name, "base_link")
+        if offset_base is None or quat_base is None:
+            return None
+        rotated_local = quat_rotate(quat_base, offset_local)
+        return [
+            offset_base[0] + rotated_local[0],
+            offset_base[1] + rotated_local[1],
+            offset_base[2] + rotated_local[2],
+        ]
+
+    def compose_visual_center_world(
+        body_name: str, offset_local: list[float]
+    ) -> tuple[list[float], list[float]] | None:
+        world_pose = compose_to_world(body_name)
+        if world_pose is None:
+            return None
+        world_pos, world_quat = world_pose
+        rotated_local = quat_rotate(world_quat, offset_local)
+        return (
+            [
+                world_pos[0] + rotated_local[0],
+                world_pos[1] + rotated_local[1],
+                world_pos[2] + rotated_local[2],
+            ],
+            world_quat,
+        )
+
+    def align_rotor_visual_bodies() -> None:
+        if worldbody is None:
+            return
+        for vis_body in worldbody.findall("body"):
+            vis_name = vis_body.get("name", "")
+            match = re.fullmatch(r"rotor_(\d+)_vis", vis_name)
+            if not match:
+                continue
+            physical_name = f"rotor_{match.group(1)}"
+            center_local = rotor_visual_center_local.get(physical_name, [0.0, 0.0, 0.0])
+            rotor_world_pose = compose_visual_center_world(physical_name, center_local)
+            if rotor_world_pose is None:
+                continue
+            vis_body.set("pos", fmt_floats(rotor_world_pose[0]))
+            vis_body.set("quat", fmt_floats(rotor_world_pose[1]))
+
     if worldbody is not None:
         seen = set()
         for geom in list(worldbody.findall("geom")):
@@ -283,8 +416,13 @@ def postprocess_xml(
         idx = list(root).index(compiler) if compiler is not None else 0
         inject_xml(root, XML_OPTION_TAG, idx + 1, source="MuJoCo option tag")
 
+    if root.find("sensor") is None:
+        inject_xml(root, XML_SENSOR_BLOCK, source="PX4 sensor block")
     if root.find("actuator") is None:
-        inject_xml(root, XML_ACTUATORS_SENSORS, source="actuators and sensors")
+        if config.target in PX4_TARGETS:
+            root.append(ET.Element("actuator"))
+        else:
+            inject_xml(root, XML_ARM_ACTUATORS, source="arm actuators")
 
     if worldbody is not None:
         rebuild_px4_multirotor(root, worldbody, config, paths)
@@ -305,21 +443,38 @@ def postprocess_xml(
         rotor_indices = sorted(
             {int(match.group(1)) for name in body_elem if (match := re.fullmatch(r"rotor_(\d+)", name))}
         )
-        offsets: dict[str, list[float]] = {}
+        offsets: dict[int, list[float]] = {}
+        rotor_site_pos_local: dict[str, list[float]] = {}
+        for body in root.iter("body"):
+            body_name = body.get("name")
+            if body_name is None or not re.fullmatch(r"rotor_(\d+)", body_name):
+                continue
+            mesh_geoms = [geom for geom in body.findall("geom") if geom.get("mesh")]
+            if not mesh_geoms:
+                rotor_site_pos_local[body_name] = [0.0, 0.0, 0.0]
+                continue
+            accum = [0.0, 0.0, 0.0]
+            for geom in mesh_geoms:
+                pos = parse_float_list(geom.get("pos"), [0.0, 0.0, 0.0])
+                accum = [accum[0] + pos[0], accum[1] + pos[1], accum[2] + pos[2]]
+            rotor_site_pos_local[body_name] = [value / len(mesh_geoms) for value in accum]
         for rotor_name in [f"rotor_{idx}" for idx in rotor_indices]:
             if rotor_name in body_elem:
-                offset = compose_to_base(rotor_name, "base_link")
+                offset = compose_rotated_offset_to_base(
+                    rotor_name, rotor_site_pos_local.get(rotor_name, [0.0, 0.0, 0.0])
+                )
                 if offset is not None:
-                    offsets[rotor_name] = offset
+                    offsets[int(rotor_name.split("_")[1])] = offset
         if not offsets:
             for name in body_elem:
                 if "rotor" not in name or name == "base_link":
                     continue
-                offset = compose_to_base(name, "base_link")
-                if offset is not None:
-                    offsets[name] = offset
+                offset = compose_rotated_offset_to_base(name, rotor_site_pos_local.get(name, [0.0, 0.0, 0.0]))
+                match = re.fullmatch(r"rotor_(\d+)", name)
+                if offset is not None and match:
+                    offsets[int(match.group(1))] = offset
         if base_body is not None:
-            for idx, vec in enumerate(offsets.values(), start=1):
+            for idx, vec in sorted(offsets.items()):
                 site_name = f"rotor_offset_{idx}"
                 if any(site.get("name") == site_name for site in base_body.findall("site")):
                     continue
@@ -344,59 +499,82 @@ def postprocess_xml(
             if body_name not in rotor_sites:
                 continue
             site_name = rotor_sites[body_name]
-            if any(site.get("name") == site_name for site in body.findall("site")):
-                continue
-            body.append(
-                ET.Element(
-                    "site",
-                    {"name": site_name, "type": "cylinder", "size": "0.01 0.005", "pos": "0 0 0", "rgba": "1 0 0 0.5"},
-                )
-            )
+            site_pos = rotor_site_pos_local.get(body_name, [0.0, 0.0, 0.0])
+            existing_site = next((site for site in body.findall("site") if site.get("name") == site_name), None)
+            site_attrib = {
+                "name": site_name,
+                "type": "cylinder",
+                "size": "0.01 0.005",
+                "pos": fmt_floats(site_pos),
+                "rgba": "1 0 0 0.5",
+            }
+            if existing_site is None:
+                body.append(ET.Element("site", site_attrib))
+            else:
+                existing_site.attrib.update(site_attrib)
 
     if worldbody is not None:
-        rotor_mesh_map: dict[str, str] = {}
-        for geom in root.iter("geom"):
-            mesh = geom.get("mesh")
-            if mesh and mesh.startswith("rotor_"):
-                match = re.match(r"(rotor_([0-9]+))", mesh)
-                if match:
-                    rotor_mesh_map[match.group(2)] = mesh
+        rotor_visual_geom_map: dict[str, list[ET.Element]] = {}
+        for body in root.iter("body"):
+            body_name = body.get("name", "")
+            match = re.fullmatch(r"rotor_(\d+)", body_name)
+            if not match:
+                continue
+            rotor_id = match.group(1)
+            for geom in body.findall("geom"):
+                mesh = geom.get("mesh")
+                if mesh:
+                    rotor_visual_geom_map.setdefault(rotor_id, []).append(deepcopy(geom))
+            rotor_visual_center_local[body_name] = [0.0, 0.0, 0.0]
+            if rotor_id in rotor_visual_geom_map and rotor_visual_geom_map[rotor_id]:
+                accum = [0.0, 0.0, 0.0]
+                for geom in rotor_visual_geom_map[rotor_id]:
+                    pos = parse_float_list(geom.get("pos"), [0.0, 0.0, 0.0])
+                    accum = [accum[0] + pos[0], accum[1] + pos[1], accum[2] + pos[2]]
+                rotor_visual_center_local[body_name] = [value / len(rotor_visual_geom_map[rotor_id]) for value in accum]
 
-        asset = root.find("asset")
-        asset_rotor_visual: dict[str, str] = {}
-        if asset is not None:
-            for mesh_elem in asset.findall("mesh"):
-                name = mesh_elem.get("name", "")
-                match = re.match(r"rotor_([0-9]+)$", name)
-                if match:
-                    asset_rotor_visual[match.group(1)] = name
-
-        for rotor_id in sorted(rotor_mesh_map, key=int):
-            mesh_name = asset_rotor_visual.get(rotor_id) or rotor_mesh_map[rotor_id]
+        for rotor_id in sorted(rotor_visual_geom_map, key=int):
             vis_name = f"rotor_{rotor_id}_vis"
             existing = next((body for body in worldbody.findall("body") if body.get("name") == vis_name), None)
+            rotor_name = f"rotor_{rotor_id}"
+            center_local = rotor_visual_center_local.get(rotor_name, [0.0, 0.0, 0.0])
+            rotor_world_pose = compose_visual_center_world(rotor_name, center_local)
+            centered_geoms: list[ET.Element] = []
+            for geom in rotor_visual_geom_map[rotor_id]:
+                geom_pos = parse_float_list(geom.get("pos"), [0.0, 0.0, 0.0])
+                centered_pos = [
+                    geom_pos[0] - center_local[0],
+                    geom_pos[1] - center_local[1],
+                    geom_pos[2] - center_local[2],
+                ]
+                if all(abs(value) <= 1e-12 for value in centered_pos):
+                    geom.attrib.pop("pos", None)
+                else:
+                    geom.set("pos", fmt_floats(centered_pos))
+                centered_geoms.append(geom)
             if existing is None:
-                new_body = ET.Element("body", {"name": vis_name, "mocap": "true"})
-                new_geom = ET.Element(
-                    "geom",
-                    {
-                        "type": "mesh",
-                        "mesh": mesh_name,
-                        "rgba": "1 1 1 1",
-                        "group": "1",
-                        "contype": "0",
-                        "conaffinity": "0",
-                    },
-                )
-                new_body.append(new_geom)
-                worldbody.append(new_body)
-            else:
-                for geom in existing.findall("geom"):
-                    geom.set("type", "mesh")
-                    geom.set("mesh", mesh_name)
+                attrs = {"name": vis_name, "mocap": "true"}
+                if rotor_world_pose is not None:
+                    attrs["pos"] = fmt_floats(rotor_world_pose[0])
+                    attrs["quat"] = fmt_floats(rotor_world_pose[1])
+                new_body = ET.Element("body", attrs)
+                for geom in centered_geoms:
                     geom.set("group", "1")
                     geom.set("contype", "0")
                     geom.set("conaffinity", "0")
+                    new_body.append(geom)
+                worldbody.append(new_body)
+            else:
+                for geom in list(existing.findall("geom")):
+                    existing.remove(geom)
+                if rotor_world_pose is not None:
+                    existing.set("pos", fmt_floats(rotor_world_pose[0]))
+                    existing.set("quat", fmt_floats(rotor_world_pose[1]))
+                for geom in centered_geoms:
+                    geom.set("group", "1")
+                    geom.set("contype", "0")
+                    geom.set("conaffinity", "0")
+                    existing.append(geom)
                 existing.set("mocap", "true")
 
         for body in root.iter("body"):
@@ -408,7 +586,7 @@ def postprocess_xml(
             for inertial in list(body.findall("inertial")):
                 body.remove(inertial)
             if config.target not in {"x500", "iris", "typhoon_h480"}:
-                for geom in list(body.findall("geom")):
+                for geom in [geom for geom in list(body.findall("geom")) if geom.get("mesh")]:
                     body.remove(geom)
 
     qpos_values: list[str] = []
@@ -436,39 +614,60 @@ def postprocess_xml(
     actuator_elem = root.find("actuator")
     if actuator_elem is not None:
         actual_joint_names = {joint.get("name") for joint in root.iter("joint") if joint.get("name")}
+        joint_ranges: dict[str, str] = {
+            joint_name: joint.get("range", "-0.78 0.78")
+            for joint in root.iter("joint")
+            for joint_name in [joint.get("name")]
+            if joint_name is not None
+        }
         for child in list(actuator_elem):
             joint_name = child.get("joint")
             if joint_name and joint_name not in actual_joint_names:
                 actuator_elem.remove(child)
 
-        existing_joints = {child.get("joint") for child in actuator_elem if child.get("joint")}
-        for joint in root.iter("joint"):
-            joint_name = joint.get("name", "")
-            joint_type = joint.get("type", "hinge")
-            if joint_type == "free" or joint_name in existing_joints or joint_name == "floating_base_joint":
-                continue
-            limited = joint.get("limited", "false") == "true"
-            ctrl_range = joint.get("range", "0 0") if limited else "-3.14 3.14"
-            is_gripper = "gripper" in joint_name
-            actuator_elem.append(
-                ET.Element(
-                    "position",
-                    {
-                        "name": joint_name,
-                        "joint": joint_name,
-                        "kp": "2000" if is_gripper else "500",
-                        "kv": "124" if is_gripper else "50",
-                        "ctrllimited": "true",
-                        "ctrlrange": ctrl_range,
-                        "forcelimited": "true",
-                        "forcerange": "-100 100",
-                    },
+        if config.target in FIXEDWING_ACTUATOR_SPECS:
+            actuator_elem.clear()
+            for actuator_name, joint_name, kp in FIXEDWING_ACTUATOR_SPECS[config.target]:
+                if joint_name not in actual_joint_names:
+                    continue
+                append_position_actuator(
+                    actuator_elem,
+                    name=actuator_name,
+                    joint=joint_name,
+                    joint_ranges=joint_ranges,
+                    kp=kp,
                 )
-            )
-        for child in list(actuator_elem):
-            joint_name = child.get("joint", "")
-            if joint_name.startswith("rotor_joint_"):
-                actuator_elem.remove(child)
+        elif config.target == "uuv_bluerov2_heavy":
+            actuator_elem.clear()
+        else:
+            existing_joints = {child.get("joint") for child in actuator_elem if child.get("joint")}
+            for joint in root.iter("joint"):
+                joint_name = joint.get("name", "")
+                joint_type = joint.get("type", "hinge")
+                if joint_type == "free" or joint_name in existing_joints or joint_name == "floating_base_joint":
+                    continue
+                limited = joint.get("limited", "false") == "true"
+                ctrl_range = joint.get("range", "0 0") if limited else "-3.14 3.14"
+                is_gripper = "gripper" in joint_name
+                actuator_elem.append(
+                    ET.Element(
+                        "position",
+                        {
+                            "name": joint_name,
+                            "joint": joint_name,
+                            "kp": "2000" if is_gripper else "500",
+                            "kv": "124" if is_gripper else "50",
+                            "ctrllimited": "true",
+                            "ctrlrange": ctrl_range,
+                            "forcelimited": "true",
+                            "forcerange": "-100 100",
+                        },
+                    )
+                )
+            for child in list(actuator_elem):
+                joint_name = child.get("joint", "")
+                if joint_name.startswith("rotor_joint_"):
+                    actuator_elem.remove(child)
 
     for geom in root.iter("geom"):
         if geom.get("name") == "floor":
@@ -478,21 +677,36 @@ def postprocess_xml(
             continue
 
         mesh_name = geom.get("mesh", "")
-        is_collision = "_decomp_" in mesh_name
-        if geom.get("group") in {"0", "3"}:
-            is_collision = True
-        elif geom.get("contype") == "1" or geom.get("conaffinity") == "1":
-            if geom.get("group") != "1":
+        geom_type = geom.get("type", "")
+        parent_body = next((body for body in root.iter("body") if geom in list(body)), None)
+        parent_name = parent_body.get("name", "") if parent_body is not None else ""
+
+        if config.target in PX4_TARGETS:
+            is_rotor_visual = parent_name.endswith("_vis") or mesh_name.startswith("rotor_")
+            is_collision = geom_type != "mesh"
+            if is_rotor_visual:
+                is_collision = False
+        else:
+            is_collision = "_decomp_" in mesh_name
+            if geom.get("group") in {"0", "3"}:
                 is_collision = True
-        if mesh_name.startswith("rotor_"):
-            is_collision = False
+            elif geom.get("contype") == "1" or geom.get("conaffinity") == "1":
+                if geom.get("group") != "1":
+                    is_collision = True
+            if mesh_name.startswith("rotor_"):
+                is_collision = False
 
         geom.set("group", "3" if is_collision else "1")
         geom.set("contype", "1" if is_collision else "0")
         geom.set("conaffinity", "1" if is_collision else "0")
+        if config.target in PX4_TARGETS and is_collision:
+            geom.set("rgba", "0 0 0 0")
 
     add_collision_exclusions(root)
     sort_attributes(root)
     calibrate_home_height(root, xml_path, config)
+    if worldbody is not None:
+        body_parent, body_elem, body_transform = rebuild_body_maps(worldbody)
+        align_rotor_visual_bodies()
     indent_xml(root)
     tree.write(xml_path, encoding="utf-8", xml_declaration=True)

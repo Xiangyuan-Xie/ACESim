@@ -1,0 +1,197 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="plane">
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value="1" />
+      <inertia ixx="0.197563" ixy="0" ixz="0" iyy="0.1458929" iyz="0" izz="0.1477" />
+    </inertial>
+    <visual name="base_link_visual_0">
+      <origin xyz="0.07 0 -0.08" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://plane/meshes/base_link_visual_0.stl" />
+      </geometry>
+      <material name="base_link_visual_material_0">
+        <color rgba="0.174999997 0.174999997 0.174999997 1" />
+      </material>
+    </visual>
+    <collision name="base_link_collision_0">
+      <origin xyz="0 0 -0.07" rpy="0 -0 0" />
+      <geometry>
+        <box size="0.47 0.47 0.11" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="rotor_4">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <mass value="0.005" />
+      <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000166704" iyz="0" izz="0.000167604" />
+    </inertial>
+    <visual name="rotor_4_visual_0">
+      <origin xyz="0 0 -0.09" rpy="0 1.57079633 0" />
+      <geometry>
+        <mesh filename="package://plane/meshes/rotor_4_vis.stl" />
+      </geometry>
+      <material name="rotor_4_visual_material_0">
+        <color rgba="0.174999997 0.174999997 0.174999997 1" />
+      </material>
+    </visual>
+    <collision name="rotor_4_collision_0">
+      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <geometry>
+        <cylinder radius="0.1" length="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="left_elevon">
+    <inertial>
+      <origin xyz="0 0.3 0" rpy="0 -0 0" />
+      <mass value="1e-08" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
+    </inertial>
+    <visual name="left_elevon_visual_0">
+      <origin xyz="0.07 0 -0.08" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://plane/meshes/left_elevon_visual_0.stl" />
+      </geometry>
+      <material name="left_elevon_visual_material_0">
+        <color rgba="1 0 0 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_elevon">
+    <inertial>
+      <origin xyz="0 -0.3 0" rpy="0 -0 0" />
+      <mass value="1e-08" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
+    </inertial>
+    <visual name="right_elevon_visual_0">
+      <origin xyz="0.07 0 -0.08" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://plane/meshes/right_elevon_visual_0.stl" />
+      </geometry>
+      <material name="right_elevon_visual_material_0">
+        <color rgba="1 0 0 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="left_flap">
+    <inertial>
+      <origin xyz="0 0.15 0" rpy="0 -0 0" />
+      <mass value="1e-08" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
+    </inertial>
+    <visual name="left_flap_visual_0">
+      <origin xyz="0.07 0 -0.08" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://plane/meshes/left_flap_visual_0.stl" />
+      </geometry>
+      <material name="left_flap_visual_material_0">
+        <color rgba="1 0 0 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="right_flap">
+    <inertial>
+      <origin xyz="0 -0.15 0" rpy="0 -0 0" />
+      <mass value="1e-08" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
+    </inertial>
+    <visual name="right_flap_visual_0">
+      <origin xyz="0.07 0 -0.08" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://plane/meshes/right_flap_visual_0.stl" />
+      </geometry>
+      <material name="right_flap_visual_material_0">
+        <color rgba="1 0 0 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="elevator">
+    <inertial>
+      <origin xyz="-0.5 0 0" rpy="0 -0 0" />
+      <mass value="1e-08" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
+    </inertial>
+    <visual name="elevator_visual_0">
+      <origin xyz="0.07 0 -0.08" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://plane/meshes/elevator_visual_0.stl" />
+      </geometry>
+      <material name="elevator_visual_material_0">
+        <color rgba="1 0 0 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="rudder">
+    <inertial>
+      <origin xyz="-0.5 0 0.05" rpy="0 -0 0" />
+      <mass value="1e-08" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
+    </inertial>
+    <visual name="rudder_visual_0">
+      <origin xyz="0.07 0 -0.08" rpy="0 -0 0" />
+      <geometry>
+        <mesh filename="package://plane/meshes/rudder_visual_0.stl" />
+      </geometry>
+      <material name="rudder_visual_material_0">
+        <color rgba="1 0 0 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="rotor_4_joint" type="continuous">
+    <origin xyz="0.3 0 0" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rotor_4" />
+    <axis xyz="1 0 0" />
+  </joint>
+  <joint name="left_elevon_joint" type="revolute">
+    <origin xyz="-0.07 0.4 0.08" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="left_elevon" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.78" upper="0.78" effort="1000" velocity="1000" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="right_elevon_joint" type="revolute">
+    <origin xyz="-0.07 -0.4 0.08" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="right_elevon" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.78" upper="0.78" effort="1000" velocity="1000" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="left_flap_joint" type="revolute">
+    <origin xyz="-0.07 0.2 0.08" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="left_flap" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.78" upper="0.78" effort="1000" velocity="1000" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="right_flap_joint" type="revolute">
+    <origin xyz="-0.07 -0.2 0.08" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="right_flap" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.78" upper="0.78" effort="1000" velocity="1000" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="elevator_joint" type="revolute">
+    <origin xyz="-0.5 0 0" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="elevator" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.78" upper="0.78" effort="1000" velocity="1000" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="rudder_joint" type="revolute">
+    <origin xyz="-0.5 0 0.05" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rudder" />
+    <axis xyz="0 0 1" />
+    <limit lower="-0.78" upper="0.78" effort="1000" velocity="1000" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+</robot>

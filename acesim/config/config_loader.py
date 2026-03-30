@@ -5,11 +5,14 @@ import tomli
 
 _ENV_MAP = {
     "mujoco": {
-        "multirotor": ("acesim.env.mujoco.multirotor_env", "MultirotorEnv"),
+        "mc": ("acesim.env.mujoco.mc_env", "MCEnv"),
         "mc_arm": ("acesim.env.mujoco.mc_arm_env", "MCArmEnv"),
+        "fw": ("acesim.env.mujoco.fw_env", "FWEnv"),
+        "vtol": ("acesim.env.mujoco.vtol_env", "VTOLEnv"),
+        "uuv": ("acesim.env.mujoco.uuv_env", "UUVEnv"),
     },
     "genesis": {
-        "multirotor": ("acesim.env.genesis.multirotor_env", "MultirotorEnv"),
+        "mc": ("acesim.env.genesis.mc_env", "MCEnv"),
         "mc_arm": ("acesim.env.genesis.mc_arm_env", "MCArmEnv"),
     },
 }

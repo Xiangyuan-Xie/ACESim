@@ -1,4 +1,4 @@
-"""Genesis multirotor environment with PX4 HIL integration."""
+"""Genesis multicopter environment with PX4 HIL integration."""
 
 import platform
 from dataclasses import dataclass
@@ -16,7 +16,7 @@ from acesim.utils.px4_transport import PX4ActuatorParams, PX4SensorParams, PX4Tr
 
 
 @dataclass
-class MultirotorParams:
+class MCParams:
     """Rotor and aerodynamic parameters that directly affect vehicle dynamics."""
 
     rotor_direction: np.ndarray
@@ -30,14 +30,14 @@ class MultirotorParams:
     max_rot_velocity: float
 
 
-class MultirotorEnv(GenesisEnv):
-    """Genesis multirotor backend with lazy runtime setup and PX4 HIL wiring."""
+class MCEnv(GenesisEnv):
+    """Genesis multicopter backend with lazy runtime setup and PX4 HIL wiring."""
 
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
         asset_params = config_loader.get_asset_params()
-        config = asset_params.get("multirotor", asset_params)
-        self._params = MultirotorParams(
+        config = asset_params.get("mc", asset_params)
+        self._params = MCParams(
             rotor_direction=np.array(config["rotor_direction"], dtype=float),
             motor_constant=float(config["motor_constant"]),
             moment_constant=float(config["moment_constant"]),

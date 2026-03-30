@@ -12,6 +12,49 @@ from launch_ros.actions import Node
 from acesim.config.config_loader import ConfigLoader
 from acesim.utils.px4_transport import PX4SensorParams
 
+_PX4_STARTUP_ENV_BY_ASSET: dict[str, dict[str, str]] = {
+    "iris": {
+        "PX4_SYS_AUTOSTART": "10016",
+        "PX4_SIM_MODEL": "none",
+    },
+    "x500": {
+        "PX4_SYS_AUTOSTART": "10016",
+        "PX4_SIM_MODEL": "none",
+    },
+    "x500_arm2x": {
+        "PX4_SYS_AUTOSTART": "10016",
+        "PX4_SIM_MODEL": "none",
+    },
+    "typhoon_h480": {
+        "PX4_SYS_AUTOSTART": "6011",
+        "PX4_SIM_MODEL": "none",
+    },
+    # These assets reuse PX4's gz_* airframe parameter sets, but ACESim still
+    # runs them through `make px4_sitl none` with HIL sensors/actuators. Force
+    # Gazebo back off so PX4 stays on the simulator_mavlink path. Overriding
+    # only SIM_GZ_EN is not enough because the gz_* airframe scripts also set
+    # PX4_SIMULATOR=gz, and px4-rc.simulator enters gz whenever either signal
+    # is present.
+    "plane": {
+        "PX4_SYS_AUTOSTART": "4008",
+        "PX4_SIM_MODEL": "none",
+        "PX4_SIMULATOR": "none",
+        "PX4_PARAM_SIM_GZ_EN": "0",
+    },
+    "standard_vtol": {
+        "PX4_SYS_AUTOSTART": "4004",
+        "PX4_SIM_MODEL": "none",
+        "PX4_SIMULATOR": "none",
+        "PX4_PARAM_SIM_GZ_EN": "0",
+    },
+    "uuv_bluerov2_heavy": {
+        "PX4_SYS_AUTOSTART": "60002",
+        "PX4_SIM_MODEL": "none",
+        "PX4_SIMULATOR": "none",
+        "PX4_PARAM_SIM_GZ_EN": "0",
+    },
+}
+
 
 def detect_acesim_root() -> Path:
     spec = importlib.util.find_spec("acesim")
@@ -52,20 +95,11 @@ def _resolve_hgt_ref_value(hgt_ref: str) -> str:
 def _resolve_px4_startup_env() -> dict[str, str]:
     """Map the configured ACESim asset onto the PX4 airframe startup environment."""
     asset_name = ConfigLoader().get_asset_name()
-
-    if asset_name == "iris" or asset_name == "x500":
-        return {
-            "PX4_SYS_AUTOSTART": "10016",
-            "PX4_SIM_MODEL": "none",
-        }
-
-    if asset_name == "typhoon_h480":
-        return {
-            "PX4_SYS_AUTOSTART": "6011",
-            "PX4_SIM_MODEL": "none",
-        }
-
-    raise ValueError(f"Unsupported PX4 startup asset: {asset_name}")
+    startup_env = _PX4_STARTUP_ENV_BY_ASSET.get(asset_name)
+    if startup_env is not None:
+        return dict(startup_env)
+    supported_assets = ", ".join(sorted(_PX4_STARTUP_ENV_BY_ASSET))
+    raise ValueError(f"Unsupported PX4 startup asset: {asset_name}. Supported assets: {supported_assets}")
 
 
 def build_px4_additional_env() -> dict[str, str]:
@@ -118,6 +152,8 @@ def build_launch_entities(
     enable_px4_post_start_setup: bool = True,
     play_start_delay_sec: float = 2.0,
 ):
+    config_loader = ConfigLoader()
+    env_type = config_loader.get_env_type()
     micro_xrce_agent = ExecuteProcess(
         cmd=["MicroXRCEAgent", "udp4", "-p", "8888"],
         output="screen",
@@ -165,10 +201,10 @@ def build_launch_entities(
     entities = [
         micro_xrce_agent,
         px4_sitl,
-        arm_command_joint_state_pub,
         clock_bridge,
-        arm_state_bridge,
     ]
+    if env_type == "mc_arm":
+        entities.extend([arm_command_joint_state_pub, arm_state_bridge])
 
     if enable_px4_post_start_setup:
         entities.append(px4_post_start_setup)

@@ -1,0 +1,6 @@
+[basic]
+sim_type = "mujoco"
+env_type = "fw"
+scene_name = "default"
+asset_name = "plane"
+benchmark = "multirotor"

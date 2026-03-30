@@ -1,0 +1,6 @@
+[basic]
+sim_type = "mujoco"
+env_type = "vtol"
+scene_name = "default"
+asset_name = "standard_vtol"
+benchmark = "multirotor"

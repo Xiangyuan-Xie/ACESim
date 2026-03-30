@@ -1,0 +1,132 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="uuv_bluerov2_heavy">
+  <compiler angle="radian" meshdir="meshes/" texturedir="meshes/" />
+  <option density="1.225" timestep="0.001" integrator="implicit" viscosity="1.8e-5" cone="elliptic" impratio="10" magnetic="2.73e-5 0 -4.54e-5" />
+  <size njmax="500" nconmax="100" />
+  <asset>
+    <mesh name="base_link_visual_0" file="base_link_visual_0.stl" />
+    <mesh name="rotor_0_vis" file="rotor_0_vis.stl" />
+    <mesh name="rotor_1_vis" file="rotor_1_vis.stl" />
+    <mesh name="rotor_2_vis" file="rotor_2_vis.stl" />
+    <mesh name="rotor_3_vis" file="rotor_3_vis.stl" />
+    <mesh name="rotor_4_vis" file="rotor_4_vis.stl" />
+    <mesh name="rotor_5_vis" file="rotor_5_vis.stl" />
+    <mesh name="rotor_6_vis" file="rotor_6_vis.stl" />
+    <mesh name="rotor_7_vis" file="rotor_7_vis.stl" />
+  </asset>
+  <worldbody>
+    <body name="base_link" pos="0 0 0.084">
+      <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="13" diaginertia="0.356 0.25 0.221" />
+      <joint name="floating_base_joint" type="free" />
+      <geom type="mesh" mesh="base_link_visual_0" pos="0 0 -0.06" group="1" contype="0" conaffinity="0" />
+      <geom type="box" size="0.25 0.125 0.054" pos="0 0 0.02" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
+      <body name="rotor_0" pos="0.14 -0.1 -0.06" quat="0.653282 -0.270598 0.653281 0.270598">
+        <site name="rotor_joint_thrust0" type="cylinder" size="0.01 0.005" pos="0 0 0.006434" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_1" pos="0.14 0.1 -0.06" quat="0.653282 0.270598 0.653281 -0.270598">
+        <site name="rotor_joint_thrust1" type="cylinder" size="0.01 0.005" pos="0 0 0.006434" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_2" pos="-0.14 -0.1 -0.06" quat="0.653282 0.270598 0.653281 -0.270598">
+        <site name="rotor_joint_thrust2" type="cylinder" size="0.01 0.005" pos="0 0 0.006434" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_3" pos="-0.14 0.1 -0.06" quat="0.653282 -0.270598 0.653281 0.270598">
+        <site name="rotor_joint_thrust3" type="cylinder" size="0.01 0.005" pos="0 0 0.006434" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_4" pos="0.12 -0.22 0">
+        <site name="rotor_joint_thrust4" type="cylinder" size="0.01 0.005" pos="0 0 0.006434" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_5" pos="0.12 0.22 0" quat="4.63268e-05 1 0 0">
+        <site name="rotor_joint_thrust5" type="cylinder" size="0.01 0.005" pos="0 0 0.006434" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_6" pos="-0.12 -0.22 0" quat="4.63268e-05 1 0 0">
+        <site name="rotor_joint_thrust6" type="cylinder" size="0.01 0.005" pos="0 0 0.006434" rgba="1 0 0 0.5" />
+      </body>
+      <body name="rotor_7" pos="-0.12 0.22 0">
+        <site name="rotor_joint_thrust7" type="cylinder" size="0.01 0.005" pos="0 0 0.006434" rgba="1 0 0 0.5" />
+      </body>
+      <site name="base_link_origin" type="sphere" size="0.01" pos="0 0 0" rgba="1 0 0 0.5" />
+      <site name="rotor_offset_0" type="sphere" size="0.005" pos="0.144550 -0.095450 -0.060000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_1" type="sphere" size="0.005" pos="0.144550 0.095450 -0.060000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_2" type="sphere" size="0.005" pos="-0.135450 -0.104550 -0.060000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_3" type="sphere" size="0.005" pos="-0.135450 0.104550 -0.060000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_4" type="sphere" size="0.005" pos="0.120000 -0.220000 0.006434" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_5" type="sphere" size="0.005" pos="0.120000 0.219999 -0.006434" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_6" type="sphere" size="0.005" pos="-0.120000 -0.220001 -0.006434" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_7" type="sphere" size="0.005" pos="-0.120000 0.220000 0.006434" rgba="0 0 1 0.5" />
+    </body>
+    <body name="rotor_0_vis" pos="0.144549526 -0.0954504757 0.0240000084" quat="0.653282003 -0.270598001 0.653281003 0.270598001" mocap="true">
+      <geom type="mesh" mesh="rotor_0_vis" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_1_vis" pos="0.144549526 0.0954504757 0.0240000084" quat="0.653282003 0.270598001 0.653281003 -0.270598001" mocap="true">
+      <geom type="mesh" mesh="rotor_1_vis" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_2_vis" pos="-0.135450474 -0.104549524 0.0240000084" quat="0.653282003 0.270598001 0.653281003 -0.270598001" mocap="true">
+      <geom type="mesh" mesh="rotor_2_vis" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_3_vis" pos="-0.135450474 0.104549524 0.0240000084" quat="0.653282003 -0.270598001 0.653281003 0.270598001" mocap="true">
+      <geom type="mesh" mesh="rotor_3_vis" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_4_vis" pos="0.12 -0.22 0.090434" quat="1 0 0 0" mocap="true">
+      <geom type="mesh" mesh="rotor_4_vis" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_5_vis" pos="0.12 0.219999404 0.077566" quat="4.63268e-05 0.999999999 0 0" mocap="true">
+      <geom type="mesh" mesh="rotor_5_vis" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_6_vis" pos="-0.12 -0.220000596 0.077566" quat="4.63268e-05 0.999999999 0 0" mocap="true">
+      <geom type="mesh" mesh="rotor_6_vis" group="1" contype="0" conaffinity="0" />
+    </body>
+    <body name="rotor_7_vis" pos="-0.12 0.22 0.090434" quat="1 0 0 0" mocap="true">
+      <geom type="mesh" mesh="rotor_7_vis" group="1" contype="0" conaffinity="0" />
+    </body>
+  </worldbody>
+  <sensor>
+    <framepos name="framepos" objtype="site" objname="base_link_origin" />
+    <framequat name="framequat" objtype="site" objname="base_link_origin" />
+    <framelinvel name="framelinvel" objtype="site" objname="base_link_origin" />
+    <gyro name="gyro" site="base_link_origin" />
+    <accelerometer name="accelerometer" site="base_link_origin" />
+    <magnetometer name="magnetometer" site="base_link_origin" />
+  </sensor>
+  <actuator />
+  <keyframe>
+    <key name="home" qpos="0 0 0.084 1 0 0 0" />
+  </keyframe>
+  <contact>
+    <exclude body1="base_link" body2="rotor_0" />
+    <exclude body1="base_link" body2="rotor_1" />
+    <exclude body1="rotor_1" body2="rotor_0" />
+    <exclude body1="base_link" body2="rotor_2" />
+    <exclude body1="rotor_2" body2="rotor_0" />
+    <exclude body1="rotor_2" body2="rotor_1" />
+    <exclude body1="base_link" body2="rotor_3" />
+    <exclude body1="rotor_3" body2="rotor_0" />
+    <exclude body1="rotor_3" body2="rotor_1" />
+    <exclude body1="rotor_3" body2="rotor_2" />
+    <exclude body1="base_link" body2="rotor_4" />
+    <exclude body1="rotor_4" body2="rotor_0" />
+    <exclude body1="rotor_4" body2="rotor_1" />
+    <exclude body1="rotor_4" body2="rotor_2" />
+    <exclude body1="rotor_4" body2="rotor_3" />
+    <exclude body1="base_link" body2="rotor_5" />
+    <exclude body1="rotor_5" body2="rotor_0" />
+    <exclude body1="rotor_5" body2="rotor_1" />
+    <exclude body1="rotor_5" body2="rotor_2" />
+    <exclude body1="rotor_5" body2="rotor_3" />
+    <exclude body1="rotor_5" body2="rotor_4" />
+    <exclude body1="base_link" body2="rotor_6" />
+    <exclude body1="rotor_6" body2="rotor_0" />
+    <exclude body1="rotor_6" body2="rotor_1" />
+    <exclude body1="rotor_6" body2="rotor_2" />
+    <exclude body1="rotor_6" body2="rotor_3" />
+    <exclude body1="rotor_6" body2="rotor_4" />
+    <exclude body1="rotor_6" body2="rotor_5" />
+    <exclude body1="base_link" body2="rotor_7" />
+    <exclude body1="rotor_7" body2="rotor_0" />
+    <exclude body1="rotor_7" body2="rotor_1" />
+    <exclude body1="rotor_7" body2="rotor_2" />
+    <exclude body1="rotor_7" body2="rotor_3" />
+    <exclude body1="rotor_7" body2="rotor_4" />
+    <exclude body1="rotor_7" body2="rotor_5" />
+    <exclude body1="rotor_7" body2="rotor_6" />
+  </contact>
+</mujoco>

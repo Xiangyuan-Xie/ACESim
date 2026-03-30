@@ -12,7 +12,7 @@ from acesim.env.base_env import BaseEnv
 from acesim.utils.simulation_clock import SimulationClock
 
 
-class MujocoEnv(BaseEnv):
+class MJEnv(BaseEnv):
     """Base class for MuJoCo environments used in ACESim.
 
     The class merges a scene XML with an asset XML, owns the MuJoCo model/data
@@ -22,6 +22,7 @@ class MujocoEnv(BaseEnv):
 
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
+        mujoco.set_mjcb_control(None)
         scene_name = self._config_loader.get_scene_name()
         asset_name = self._config_loader.get_asset_name()
         scene_path = (Path(__file__).parent / "scene" / f"{scene_name}.xml").resolve()
@@ -75,6 +76,7 @@ class MujocoEnv(BaseEnv):
     def close(self):
         """Release the shared simulation clock owned by the base backend."""
 
+        mujoco.set_mjcb_control(None)
         self._sim_clock.close()
 
     def _merge_scene_robot_xml(self, scene_path: Path, robot_path: Path) -> str:

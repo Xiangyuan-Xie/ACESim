@@ -1,4 +1,4 @@
-"""MuJoCo multirotor environment extended with the manipulator control stack."""
+"""MuJoCo multicopter environment extended with the manipulator control stack."""
 
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -8,7 +8,7 @@ import mujoco
 from acetele.core.make_robot import make_robot
 
 from acesim.config.config_loader import ConfigLoader
-from acesim.env.mujoco.multirotor_env import MultirotorEnv
+from acesim.env.mujoco.mc_env import MCEnv
 from acesim.utils.arm_servo_scheduler import ArmControlSample, ArmServoScheduler, ArmStateSample
 from acesim.utils.arm_state_publisher import ArmStatePublisher
 
@@ -21,8 +21,8 @@ class MCArmParams:
     arm_state_publish_rate_hz: float
 
 
-class MCArmEnv(MultirotorEnv):
-    """MuJoCo multirotor environment with an attached arm control agent."""
+class MCArmEnv(MCEnv):
+    """MuJoCo multicopter environment with an attached arm control agent."""
 
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)
@@ -165,7 +165,7 @@ class MCArmEnv(MultirotorEnv):
         return ArmStateSample(positions=positions, velocities=velocities, efforts=efforts)
 
     def _update_custom_control(self):
-        """Extend the multirotor control hook with manipulator actuation."""
+        """Extend the multicopter control hook with manipulator actuation."""
 
         self._arm_servo_scheduler.update()
 
@@ -174,3 +174,4 @@ class MCArmEnv(MultirotorEnv):
 
         self._robot.close()
         self._arm_state_publisher.close()
+        super().close()

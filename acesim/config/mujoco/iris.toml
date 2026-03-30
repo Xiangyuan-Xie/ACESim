@@ -34,3 +34,8 @@ ekf2_evv_noise = 0.01
 ekf2_eva_noise = 0.01
 ekf2_gps_ctrl = 0
 ekf2_mag_type = 0
+
+[params.visual_stream]
+enabled = true
+rate_hz = 120.0
+zmq_endpoint = "tcp://0.0.0.0:5602"

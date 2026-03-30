@@ -202,6 +202,7 @@ class PX4Transport:
     HIL_SENSOR_FIELDS_ACCEL = 0b0000000000111
     HIL_SENSOR_FIELDS_GYRO = 0b0000000111000
     HIL_SENSOR_FIELDS_MAG = 0b0000111000000
+    HIL_SENSOR_FIELDS_DIFF_PRESS = 0b0010000000000
     HIL_SENSOR_FIELDS_BARO = 0b1101000000000
 
     def __init__(
@@ -328,8 +329,6 @@ class PX4Transport:
                 raise ValueError("HIL_ACTUATOR_CONTROLS does not provide enough channels")
             if not np.all(np.isfinite(normalized)):
                 raise ValueError("HIL_ACTUATOR_CONTROLS contains non-finite values")
-            if np.any((normalized[:channel_count] < 0.0) | (normalized[:channel_count] > 1.0)):
-                raise ValueError("HIL_ACTUATOR_CONTROLS must stay within [0, 1]")
             self._enqueue_actuator_command(normalized[:channel_count], sim_time_us)
 
         self._apply_due_actuator_commands(sim_time_us, channel_count)
@@ -371,6 +370,7 @@ class PX4Transport:
         gyro_frd: FloatArray,
         mag_frd: FloatArray,
         altitude_m: float,
+        diff_pressure_hpa: float = 0.0,
         temperature_celsius: float = 25.0,
         fields_updated: int = HIL_SENSOR_FIELDS_ACCEL | HIL_SENSOR_FIELDS_GYRO,
     ) -> None:
@@ -394,7 +394,7 @@ class PX4Transport:
                 mag_frd[1],
                 mag_frd[2],
                 abs_pressure,
-                0,
+                diff_pressure_hpa,
                 altitude_m,
                 temperature_celsius,
                 fields_updated,
