@@ -9,4 +9,4 @@
 [submodule "acesim/deploy/aircraft/px4_msgs"]
 	path = acesim/deploy/aircraft/px4_msgs
 	url = https://github.com/PX4/px4_msgs
-	branch = main
+	branch = release/1.17
