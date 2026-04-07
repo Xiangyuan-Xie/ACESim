@@ -78,7 +78,7 @@
   </asset>
   <worldbody>
     <body name="base_link" pos="0 0 0.269138">
-      <inertial pos="-0.000763566 0.000110304 -0.0391436" quat="0.502318 0.509049 -0.492447 0.496026" mass="0.68805" diaginertia="0.0157539 0.0127367 0.0122218" />
+      <inertial pos="-0.000763566 0.000110304 -0.0391436" quat="0.502318 0.509049 -0.492447 0.496026" mass="2" diaginertia="0.04 0.0216667 0.0216667" />
       <joint name="floating_base_joint" type="free" />
       <geom type="mesh" mesh="base_link" rgba="1 1 1 1" group="1" contype="0" conaffinity="0" />
       <geom type="mesh" mesh="base_link_decomp_0" rgba="1 1 1 1" group="3" contype="1" conaffinity="1" />
