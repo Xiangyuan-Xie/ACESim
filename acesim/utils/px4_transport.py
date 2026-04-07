@@ -22,31 +22,11 @@ FloatArray: TypeAlias = NDArray[np.float64]
 
 @dataclass(frozen=True)
 class PX4ActuatorParams:
-    """Timing parameters for delayed actuator command delivery."""
+    """Actuator transport parameters.
 
-    motor_cmd_rate_hz: float
-    motor_exec_delay_ms_range: tuple[float, float]
-
-    def __post_init__(self) -> None:
-        if self.motor_cmd_rate_hz <= 0.0:
-            raise ValueError("motor_cmd_rate_hz must be positive")
-        if len(self.motor_exec_delay_ms_range) != 2:
-            raise ValueError("motor_exec_delay_ms_range must contain exactly two values")
-        delay_min_ms = float(self.motor_exec_delay_ms_range[0])
-        delay_max_ms = float(self.motor_exec_delay_ms_range[1])
-        if delay_min_ms < 0.0 or delay_max_ms < 0.0:
-            raise ValueError("motor_exec_delay_ms_range must be non-negative")
-        if delay_min_ms > delay_max_ms:
-            raise ValueError("motor_exec_delay_ms_range must be ordered as (min, max)")
-
-    @classmethod
-    def zero_disturbance(cls, motor_cmd_rate_hz: float) -> "PX4ActuatorParams":
-        """Return a transport model with no extra execution delay."""
-
-        return cls(
-            motor_cmd_rate_hz=float(motor_cmd_rate_hz),
-            motor_exec_delay_ms_range=(0.0, 0.0),
-        )
+    The simulator relies on ROS2/XRCE/PX4 middleware timing directly and does
+    not add any extra actuator execution delay of its own.
+    """
 
 
 @dataclass(frozen=True)
@@ -220,7 +200,6 @@ class PX4Transport:
         )
         self._is_connected: bool = False
         self._is_armed: bool = False
-        self._pending_actuator_commands: list[tuple[int, FloatArray]] = []
         self._applied_actuator_controls: FloatArray | None = None
 
     @property
@@ -240,55 +219,9 @@ class PX4Transport:
         return True
 
     def clear_actuator_controls(self) -> None:
-        """Reset the delayed actuator queue and the last applied command."""
+        """Reset the last applied command."""
 
-        self._pending_actuator_commands = []
         self._applied_actuator_controls = None
-
-    def _sample_delay_us(self) -> int:
-        """Sample one command execution delay in microseconds.
-
-        Each actuator frame gets its own independent delay sample. There is no
-        stateful delay model anymore, only one uniform draw inside the
-        configured millisecond range.
-        """
-
-        delay_min_ms, delay_max_ms = self._actuator_params.motor_exec_delay_ms_range
-        if delay_max_ms == delay_min_ms:
-            return int(round(delay_min_ms * 1000.0))
-        return int(round(np.random.uniform(delay_min_ms, delay_max_ms) * 1000.0))
-
-    def _enqueue_actuator_command(self, normalized_controls: FloatArray, sim_time_us: int) -> None:
-        """Queue one normalized actuator command for future release."""
-
-        delay_us = self._sample_delay_us()
-        release_time_us = sim_time_us + delay_us
-        self._pending_actuator_commands.append((release_time_us, normalized_controls.copy()))
-
-    def _apply_due_actuator_commands(self, sim_time_us: int, channel_count: int) -> None:
-        """Apply the newest queued command whose release time has passed."""
-
-        if not self._pending_actuator_commands:
-            return
-
-        remaining_commands: list[tuple[int, FloatArray]] = []
-        latest_due_cmd: FloatArray | None = None
-        latest_due_release = -1
-        for release_time_us, command in self._pending_actuator_commands:
-            if release_time_us <= sim_time_us:
-                if release_time_us >= latest_due_release:
-                    latest_due_release = release_time_us
-                    latest_due_cmd = command
-            else:
-                remaining_commands.append((release_time_us, command))
-
-        if latest_due_cmd is not None:
-            applied = np.zeros(channel_count, dtype=float)
-            copy_count = min(channel_count, latest_due_cmd.size)
-            applied[:copy_count] = latest_due_cmd[:copy_count]
-            self._applied_actuator_controls = applied
-
-        self._pending_actuator_commands = remaining_commands
 
     def _read_latest_actuator_controls(self) -> Sequence[float] | None:
         """Drain queued HIL_ACTUATOR_CONTROLS frames and return the latest one.
@@ -315,7 +248,9 @@ class PX4Transport:
         return latest_controls
 
     def update_actuator_commands(self, sim_time_us: int, channel_count: int) -> None:
-        """Advance the actuator timing model and expose any command due now."""
+        """Drain the latest actuator frame and expose it immediately."""
+
+        del sim_time_us
 
         if channel_count <= 0:
             raise ValueError("channel_count must be positive")
@@ -329,17 +264,12 @@ class PX4Transport:
                 raise ValueError("HIL_ACTUATOR_CONTROLS does not provide enough channels")
             if not np.all(np.isfinite(normalized)):
                 raise ValueError("HIL_ACTUATOR_CONTROLS contains non-finite values")
-            self._enqueue_actuator_command(normalized[:channel_count], sim_time_us)
-
-        self._apply_due_actuator_commands(sim_time_us, channel_count)
+            applied = np.zeros(channel_count, dtype=float)
+            applied[:channel_count] = normalized[:channel_count]
+            self._applied_actuator_controls = applied
 
     def read_applied_actuator_controls(self, channel_count: int) -> FloatArray | None:
-        """Return the currently released normalized actuator controls.
-
-        ``None`` means no delayed actuator frame has reached its release time
-        yet. Callers decide how to keep their previous control targets in that
-        case.
-        """
+        """Return the latest normalized actuator controls seen so far."""
 
         if channel_count <= 0:
             raise ValueError("channel_count must be positive")

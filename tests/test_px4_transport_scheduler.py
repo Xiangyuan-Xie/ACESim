@@ -142,7 +142,7 @@ class PX4TransportSchedulerTests(unittest.TestCase):
     def test_signed_hil_actuator_controls_are_accepted(self, mock_connection: MagicMock) -> None:
         connection = _FakeConnection()
         mock_connection.return_value = connection
-        transport = PX4Transport(PX4ActuatorParams.zero_disturbance(200.0))
+        transport = PX4Transport(PX4ActuatorParams())
         transport._is_connected = True
         connection.enqueue(
             "HIL_ACTUATOR_CONTROLS",

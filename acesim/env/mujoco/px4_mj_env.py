@@ -32,14 +32,7 @@ class PX4MJEnv(MJEnv):
                 dynamic_hil_sensor_fields=False,
             )
             self._visual_stream_params = VehicleVisualStreamParams.from_asset_params(self._asset_params)
-
-            delay_ms_range_raw = self._asset_params.get("motor_exec_delay_ms_range", (2.0, 10.0))
-            assert len(delay_ms_range_raw) == 2, "motor_exec_delay_ms_range must contain [min, max]"
-            delay_ms_range = (float(delay_ms_range_raw[0]), float(delay_ms_range_raw[1]))
-            self._px4_actuator_params = PX4ActuatorParams(
-                motor_cmd_rate_hz=float(self._asset_params.get("motor_cmd_rate_hz", 200.0)),
-                motor_exec_delay_ms_range=delay_ms_range,
-            )
+            self._px4_actuator_params = PX4ActuatorParams()
 
             self._px4_transport = PX4Transport(self._px4_actuator_params)
             self._visual_state_publisher = VehicleVisualStatePublisher(self._visual_stream_params)

@@ -1,6 +1,4 @@
 [params]
-motor_cmd_rate_hz = 200.0
-motor_exec_delay_ms_range = [2.0, 10.0]
 
 [params.px4_fusion]
 mode = "hil"

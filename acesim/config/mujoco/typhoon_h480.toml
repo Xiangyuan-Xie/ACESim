@@ -8,8 +8,6 @@ time_constant_up = 0.0125
 time_constant_down = 0.025
 max_rot_velocity = 1500.0
 max_relative_airspeed_mps = 25.0
-motor_cmd_rate_hz = 200.0
-motor_exec_delay_ms_range = [2.0, 10.0]
 rotor_radius = 0.128
 
 [params.px4_fusion]

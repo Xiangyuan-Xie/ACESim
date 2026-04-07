@@ -52,9 +52,7 @@ class MCEnv(GenesisEnv):
             asset_params,
             dynamic_hil_sensor_fields=True,
         )
-        self._px4_actuator_params = PX4ActuatorParams.zero_disturbance(
-            motor_cmd_rate_hz=self._px4_sensor_params.hil_sensor_rate_hz
-        )
+        self._px4_actuator_params = PX4ActuatorParams()
 
         self._px4_transport = None
         self._sensor_scheduler = None
