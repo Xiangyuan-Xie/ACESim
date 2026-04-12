@@ -3,30 +3,30 @@
   <link name="base_link">
     <inertial>
       <origin xyz="0 0 0" rpy="0 -0 0" />
-      <mass value="13" />
-      <inertia ixx="0.25" ixy="0" ixz="0" iyy="0.221" iyz="0" izz="0.356" />
+      <mass value="11" />
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1" />
     </inertial>
     <visual name="base_link_visual_0">
-      <origin xyz="0 0 -0.06" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 -0 0" />
       <geometry>
         <mesh filename="package://uuv_bluerov2_heavy/meshes/base_link_visual_0.stl" />
       </geometry>
     </visual>
     <collision name="base_link_collision_0">
-      <origin xyz="0 0 0.02" rpy="0 -0 0" />
+      <origin xyz="-0.009184299751737554 -0.0001519937021984552 0.0122701525489529" rpy="0 -0 0" />
       <geometry>
-        <box size="0.5 0.25 0.108" />
+        <box size="0.45510339736938477 0.5744732022285461 0.25284991040825844" />
       </geometry>
     </collision>
   </link>
   <link name="rotor_0">
     <inertial>
       <origin xyz="0 0 0" rpy="0 -0 0" />
-      <mass value="0.05" />
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+      <mass value="1e-10" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
     <visual name="rotor_0_visual_0">
-      <origin xyz="0 0 0.006434" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://uuv_bluerov2_heavy/meshes/rotor_0_vis.stl" />
       </geometry>
@@ -35,11 +35,11 @@
   <link name="rotor_1">
     <inertial>
       <origin xyz="0 0 0" rpy="0 -0 0" />
-      <mass value="0.05" />
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+      <mass value="1e-10" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
     <visual name="rotor_1_visual_0">
-      <origin xyz="0 0 0.006434" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://uuv_bluerov2_heavy/meshes/rotor_1_vis.stl" />
       </geometry>
@@ -48,11 +48,11 @@
   <link name="rotor_2">
     <inertial>
       <origin xyz="0 0 0" rpy="0 -0 0" />
-      <mass value="0.05" />
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+      <mass value="1e-10" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
     <visual name="rotor_2_visual_0">
-      <origin xyz="0 0 0.006434" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://uuv_bluerov2_heavy/meshes/rotor_2_vis.stl" />
       </geometry>
@@ -61,11 +61,11 @@
   <link name="rotor_3">
     <inertial>
       <origin xyz="0 0 0" rpy="0 -0 0" />
-      <mass value="0.05" />
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+      <mass value="1e-10" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
     <visual name="rotor_3_visual_0">
-      <origin xyz="0 0 0.006434" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://uuv_bluerov2_heavy/meshes/rotor_3_vis.stl" />
       </geometry>
@@ -74,11 +74,11 @@
   <link name="rotor_4">
     <inertial>
       <origin xyz="0 0 0" rpy="0 -0 0" />
-      <mass value="0.05" />
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+      <mass value="1e-10" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
     <visual name="rotor_4_visual_0">
-      <origin xyz="0 0 0.006434" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://uuv_bluerov2_heavy/meshes/rotor_4_vis.stl" />
       </geometry>
@@ -87,11 +87,11 @@
   <link name="rotor_5">
     <inertial>
       <origin xyz="0 0 0" rpy="0 -0 0" />
-      <mass value="0.05" />
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+      <mass value="1e-10" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
     <visual name="rotor_5_visual_0">
-      <origin xyz="0 0 0.006434" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://uuv_bluerov2_heavy/meshes/rotor_5_vis.stl" />
       </geometry>
@@ -100,11 +100,11 @@
   <link name="rotor_6">
     <inertial>
       <origin xyz="0 0 0" rpy="0 -0 0" />
-      <mass value="0.05" />
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+      <mass value="1e-10" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
     <visual name="rotor_6_visual_0">
-      <origin xyz="0 0 0.006434" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://uuv_bluerov2_heavy/meshes/rotor_6_vis.stl" />
       </geometry>
@@ -113,60 +113,60 @@
   <link name="rotor_7">
     <inertial>
       <origin xyz="0 0 0" rpy="0 -0 0" />
-      <mass value="0.05" />
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
+      <mass value="1e-10" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
     <visual name="rotor_7_visual_0">
-      <origin xyz="0 0 0.006434" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://uuv_bluerov2_heavy/meshes/rotor_7_vis.stl" />
       </geometry>
     </visual>
   </link>
   <joint name="rotor_0_joint" type="continuous">
-    <origin xyz="0.14 -0.1 -0.06" rpy="1.69865416e-10 1.570796 0.785398" />
+    <origin xyz="0.14 -0.1 0" rpy="0 1.570796 0.78539815" />
     <parent link="base_link" />
     <child link="rotor_0" />
     <axis xyz="0 0 1" />
   </joint>
   <joint name="rotor_1_joint" type="continuous">
-    <origin xyz="0.14 0.1 -0.06" rpy="-1.69865416e-10 1.570796 -0.785398" />
+    <origin xyz="0.14 0.1 0" rpy="0 1.570796 -0.78539815" />
     <parent link="base_link" />
     <child link="rotor_1" />
     <axis xyz="0 0 1" />
   </joint>
   <joint name="rotor_2_joint" type="continuous">
-    <origin xyz="-0.14 -0.1 -0.06" rpy="-1.69865416e-10 1.570796 -0.785398" />
+    <origin xyz="-0.14 -0.1 0" rpy="0 1.570796 2.356194" />
     <parent link="base_link" />
     <child link="rotor_2" />
     <axis xyz="0 0 1" />
   </joint>
   <joint name="rotor_3_joint" type="continuous">
-    <origin xyz="-0.14 0.1 -0.06" rpy="1.69865416e-10 1.570796 0.785398" />
+    <origin xyz="-0.14 0.1 0" rpy="0 1.570796 -2.356194" />
     <parent link="base_link" />
     <child link="rotor_3" />
     <axis xyz="0 0 1" />
   </joint>
   <joint name="rotor_4_joint" type="continuous">
-    <origin xyz="0.12 -0.22 0" rpy="0 -0 0" />
+    <origin xyz="0.12 -0.22 0.08" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="rotor_4" />
     <axis xyz="0 0 1" />
   </joint>
   <joint name="rotor_5_joint" type="continuous">
-    <origin xyz="0.12 0.22 0" rpy="3.1415 -0 0" />
+    <origin xyz="0.12 0.22 0.08" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="rotor_5" />
     <axis xyz="0 0 1" />
   </joint>
   <joint name="rotor_6_joint" type="continuous">
-    <origin xyz="-0.12 -0.22 0" rpy="3.1415 -0 0" />
+    <origin xyz="-0.12 -0.22 0.08" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="rotor_6" />
     <axis xyz="0 0 1" />
   </joint>
   <joint name="rotor_7_joint" type="continuous">
-    <origin xyz="-0.12 0.22 0" rpy="0 -0 0" />
+    <origin xyz="-0.12 0.22 0.08" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="rotor_7" />
     <axis xyz="0 0 1" />

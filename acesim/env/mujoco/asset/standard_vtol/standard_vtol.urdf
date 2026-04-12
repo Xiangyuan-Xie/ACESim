@@ -2,75 +2,21 @@
 <robot name="standard_vtol">
   <link name="base_link">
     <inertial>
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <mass value="5" />
-      <inertia ixx="0.477708333" ixy="0" ixz="0" iyy="0.341666667" iyz="0" izz="0.811041667" />
+      <inertia ixx="0.477708333333" ixy="0" ixz="0" iyy="0.341666666667" iyz="0" izz="0.811041666667" />
     </inertial>
     <visual name="base_link_visual_0">
-      <origin xyz="0.53 -1.072 -0.1" rpy="1.57079633 -0 -3.14159265" />
+      <origin xyz="0.53 -1.072 -0.1" rpy="1.5707963268 0 3.1415926536" />
       <geometry>
-        <mesh filename="package://standard_vtol/meshes/base_link_visual_0.stl" />
+        <mesh filename="package://standard_vtol/meshes/base_link_visual_0.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="base_link_visual_material_0">
         <color rgba="0.174999997 0.174999997 0.174999997 1" />
       </material>
     </visual>
-    <visual name="base_link_visual_1">
-      <origin xyz="0 0.35 0.01" rpy="0 -0 0" />
-      <geometry>
-        <box size="0.74 0.03 0.03" />
-      </geometry>
-      <material name="base_link_visual_material_1">
-        <color rgba="0.174999997 0.174999997 0.174999997 1" />
-      </material>
-    </visual>
-    <visual name="base_link_visual_2">
-      <origin xyz="0 -0.35 0.01" rpy="0 -0 0" />
-      <geometry>
-        <box size="0.74 0.03 0.03" />
-      </geometry>
-      <material name="base_link_visual_material_2">
-        <color rgba="0.174999997 0.174999997 0.174999997 1" />
-      </material>
-    </visual>
-    <visual name="base_link_visual_3">
-      <origin xyz="-0.35 0.35 0.045" rpy="0 -0 0" />
-      <geometry>
-        <cylinder radius="0.02" length="0.035" />
-      </geometry>
-      <material name="base_link_visual_material_3">
-        <color rgba="0.174999997 0.174999997 0.174999997 1" />
-      </material>
-    </visual>
-    <visual name="base_link_visual_4">
-      <origin xyz="-0.35 -0.35 0.045" rpy="0 -0 0" />
-      <geometry>
-        <cylinder radius="0.02" length="0.035" />
-      </geometry>
-      <material name="base_link_visual_material_4">
-        <color rgba="0.174999997 0.174999997 0.174999997 1" />
-      </material>
-    </visual>
-    <visual name="base_link_visual_5">
-      <origin xyz="0.35 -0.35 0.045" rpy="0 -0 0" />
-      <geometry>
-        <cylinder radius="0.02" length="0.035" />
-      </geometry>
-      <material name="base_link_visual_material_5">
-        <color rgba="0.174999997 0.174999997 0.174999997 1" />
-      </material>
-    </visual>
-    <visual name="base_link_visual_6">
-      <origin xyz="0.35 0.35 0.045" rpy="0 -0 0" />
-      <geometry>
-        <cylinder radius="0.02" length="0.035" />
-      </geometry>
-      <material name="base_link_visual_material_6">
-        <color rgba="0.174999997 0.174999997 0.174999997 1" />
-      </material>
-    </visual>
     <collision name="base_link_collision_0">
-      <origin xyz="0 0 -0.07" rpy="0 -0 0" />
+      <origin xyz="0 0 -0.07" rpy="0 0 0" />
       <geometry>
         <box size="0.55 2.144 0.05" />
       </geometry>
@@ -78,21 +24,21 @@
   </link>
   <link name="rotor_0">
     <inertial>
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <mass value="0.005" />
       <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000166704" iyz="0" izz="0.000167604" />
     </inertial>
     <visual name="rotor_0_visual_0">
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://standard_vtol/meshes/rotor_0_vis.stl" />
+        <mesh filename="package://standard_vtol/meshes/rotor_0_vis.stl" scale="1 1 1" />
       </geometry>
       <material name="rotor_0_visual_material_0">
         <color rgba="0 0 1 1" />
       </material>
     </visual>
     <collision name="rotor_0_collision_0">
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <cylinder radius="0.1" length="0.005" />
       </geometry>
@@ -100,21 +46,21 @@
   </link>
   <link name="rotor_1">
     <inertial>
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <mass value="0.005" />
       <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000166704" iyz="0" izz="0.000167604" />
     </inertial>
     <visual name="rotor_1_visual_0">
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://standard_vtol/meshes/rotor_1_vis.stl" />
+        <mesh filename="package://standard_vtol/meshes/rotor_1_vis.stl" scale="1 1 1" />
       </geometry>
       <material name="rotor_1_visual_material_0">
         <color rgba="0 0 1 1" />
       </material>
     </visual>
     <collision name="rotor_1_collision_0">
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <cylinder radius="0.1" length="0.005" />
       </geometry>
@@ -122,21 +68,21 @@
   </link>
   <link name="rotor_2">
     <inertial>
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <mass value="0.005" />
       <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000166704" iyz="0" izz="0.000167604" />
     </inertial>
     <visual name="rotor_2_visual_0">
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://standard_vtol/meshes/rotor_2_vis.stl" />
+        <mesh filename="package://standard_vtol/meshes/rotor_2_vis.stl" scale="1 1 1" />
       </geometry>
       <material name="rotor_2_visual_material_0">
-        <color rgba="0 0 1 1" />
+        <color rgba="0.174999997 0.174999997 0.174999997 1" />
       </material>
     </visual>
     <collision name="rotor_2_collision_0">
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <cylinder radius="0.1" length="0.005" />
       </geometry>
@@ -144,21 +90,21 @@
   </link>
   <link name="rotor_3">
     <inertial>
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <mass value="0.005" />
       <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000166704" iyz="0" izz="0.000167604" />
     </inertial>
     <visual name="rotor_3_visual_0">
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://standard_vtol/meshes/rotor_3_vis.stl" />
+        <mesh filename="package://standard_vtol/meshes/rotor_3_vis.stl" scale="1 1 1" />
       </geometry>
       <material name="rotor_3_visual_material_0">
-        <color rgba="0 0 1 1" />
+        <color rgba="0.174999997 0.174999997 0.174999997 1" />
       </material>
     </visual>
     <collision name="rotor_3_collision_0">
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <cylinder radius="0.1" length="0.005" />
       </geometry>
@@ -166,21 +112,21 @@
   </link>
   <link name="rotor_4">
     <inertial>
-      <origin xyz="0 0 0" rpy="0 -0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <mass value="0.005" />
       <inertia ixx="9.75e-07" ixy="0" ixz="0" iyy="0.000166704" iyz="0" izz="0.000167604" />
     </inertial>
     <visual name="rotor_4_visual_0">
-      <origin xyz="0 0 -0.04" rpy="0 1.57079633 0" />
+      <origin xyz="0 0 -0.04" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://standard_vtol/meshes/rotor_4_vis.stl" />
+        <mesh filename="package://standard_vtol/meshes/rotor_4_vis.stl" scale="0.8 0.8 0.8" />
       </geometry>
       <material name="rotor_4_visual_material_0">
         <color rgba="0 0 1 1" />
       </material>
     </visual>
     <collision name="rotor_4_collision_0">
-      <origin xyz="0 0 -0.04" rpy="0 -0 0" />
+      <origin xyz="0 0 -0.04" rpy="0 0 0" />
       <geometry>
         <cylinder radius="0.06" length="0.005" />
       </geometry>
@@ -188,14 +134,14 @@
   </link>
   <link name="left_elevon">
     <inertial>
-      <origin xyz="0 0.3 0" rpy="0 -0 0" />
+      <origin xyz="0 0.3 0" rpy="0 0 0" />
       <mass value="1e-08" />
       <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
     <visual name="left_elevon_visual_0">
-      <origin xyz="-0.105 0.004 -0.034" rpy="0 0 0" />
+      <origin xyz="-0.0837159863 -0.594838326 -0.029" rpy="1.57079633 0 2.87659265" />
       <geometry>
-        <mesh filename="package://standard_vtol/meshes/left_elevon_visual_0.stl" />
+        <mesh filename="package://standard_vtol/meshes/left_elevon_visual_0.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="left_elevon_visual_material_0">
         <color rgba="0 0 1 1" />
@@ -204,14 +150,14 @@
   </link>
   <link name="right_elevon">
     <inertial>
-      <origin xyz="0 -0.6 0" rpy="0 -0 0" />
+      <origin xyz="0 -0.6 0" rpy="0 0 0" />
       <mass value="1e-08" />
       <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
     <visual name="right_elevon_visual_0">
-      <origin xyz="-0.105 -0.004 -0.034" rpy="0 0 0" />
+      <origin xyz="0.558052447 -0.296179788 -0.029" rpy="1.57079633 0 -2.87659265" />
       <geometry>
-        <mesh filename="package://standard_vtol/meshes/right_elevon_visual_0.stl" />
+        <mesh filename="package://standard_vtol/meshes/right_elevon_visual_0.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="right_elevon_visual_material_0">
         <color rgba="0 0 1 1" />
@@ -220,7 +166,14 @@
   </link>
   <link name="elevator">
     <inertial>
-      <origin xyz="-0.5 0 0" rpy="0 -0 0" />
+      <origin xyz="-0.5 0 0" rpy="0 0 0" />
+      <mass value="1e-08" />
+      <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
+    </inertial>
+  </link>
+  <link name="rudder">
+    <inertial>
+      <origin xyz="-0.5 0 0.05" rpy="0 0 0" />
       <mass value="1e-08" />
       <inertia ixx="1e-06" ixy="0" ixz="0" iyy="1e-06" iyz="0" izz="1e-06" />
     </inertial>
@@ -250,17 +203,17 @@
     <axis xyz="0 0 1" />
   </joint>
   <joint name="rotor_4_joint" type="continuous">
-    <origin xyz="-0.22 0 0" rpy="0 0 0" />
+    <origin xyz="-0.22 0 0" rpy="0 1.57 0" />
     <parent link="base_link" />
     <child link="rotor_4" />
     <axis xyz="1 0 0" />
   </joint>
   <joint name="left_elevon_joint" type="revolute">
-    <origin xyz="-0.18 0.6 -0.005" rpy="0 -0 0.265" />
+    <origin xyz="-0.18 0.6 -0.005" rpy="0 0 0.265" />
     <parent link="base_link" />
     <child link="left_elevon" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.78" upper="0.78" effort="1000" velocity="1000" />
+    <limit lower="-0.53" upper="0.53" effort="1000" velocity="1000" />
     <dynamics damping="1" friction="0" />
   </joint>
   <joint name="right_elevon_joint" type="revolute">
@@ -268,7 +221,7 @@
     <parent link="base_link" />
     <child link="right_elevon" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.78" upper="0.78" effort="1000" velocity="1000" />
+    <limit lower="-0.53" upper="0.53" effort="1000" velocity="1000" />
     <dynamics damping="1" friction="0" />
   </joint>
   <joint name="elevator_joint" type="revolute">
@@ -276,7 +229,15 @@
     <parent link="base_link" />
     <child link="elevator" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.78" upper="0.78" effort="1000" velocity="1000" />
+    <limit lower="-0.53" upper="0.53" effort="1000" velocity="1000" />
+    <dynamics damping="1" friction="0" />
+  </joint>
+  <joint name="rudder_joint" type="revolute">
+    <origin xyz="-0.5 0 0.05" rpy="0.00 0 0.0" />
+    <parent link="base_link" />
+    <child link="rudder" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.01" upper="0.01" effort="1000" velocity="1000" />
     <dynamics damping="1" friction="0" />
   </joint>
 </robot>

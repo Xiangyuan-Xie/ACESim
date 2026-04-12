@@ -104,17 +104,17 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             self.assertGreater(prop_force_b[0], 0.0)
 
             env._handle_applied_actuator_controls(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0], dtype=float))
-            _, elevator_moment = env._compute_aero_wrench(0.0)
+            _, elevator_moment = env._compute_aero_wrench()
             self.assertGreater(abs(elevator_moment[1]), 1e-4)
 
             env._handle_applied_actuator_controls(
                 np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.35, -0.35, 0.0, 0.0], dtype=float)
             )
-            _, roll_moment = env._compute_aero_wrench(0.0)
+            _, roll_moment = env._compute_aero_wrench()
             self.assertGreater(abs(roll_moment[0]), 1e-4)
 
             env._handle_applied_actuator_controls(np.array([0.0, 0.0, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float))
-            _, yaw_moment = env._compute_aero_wrench(0.0)
+            _, yaw_moment = env._compute_aero_wrench()
             self.assertGreater(abs(yaw_moment[2]), 1e-4)
             self.assertGreater(env._read_diff_pressure_hpa() or 0.0, 0.0)
         finally:
@@ -137,7 +137,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             )
             env._update_puller_speed(1.0)
             prop_force_b, _ = env._compute_propeller_force(np.array([18.0, 0.0, 0.0], dtype=float))
-            _, aero_moment = env._compute_aero_wrench(1.0)
+            _, aero_moment = env._compute_aero_wrench()
             self.assertGreater(prop_force_b[0], 0.0)
             self.assertGreater(np.linalg.norm(aero_moment), 1e-4)
         finally:

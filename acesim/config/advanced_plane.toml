@@ -2,5 +2,5 @@
 sim_type = "mujoco"
 env_type = "fw"
 scene_name = "default"
-asset_name = "plane"
+asset_name = "advanced_plane"
 benchmark = "multirotor"

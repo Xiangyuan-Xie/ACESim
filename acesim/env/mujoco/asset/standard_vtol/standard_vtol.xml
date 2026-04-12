@@ -4,67 +4,60 @@
   <option density="1.225" timestep="0.001" integrator="implicit" viscosity="1.8e-5" cone="elliptic" impratio="10" magnetic="2.73e-5 0 -4.54e-5" />
   <size njmax="500" nconmax="100" />
   <asset>
-    <mesh name="base_link_visual_0" file="base_link_visual_0.stl" />
+    <mesh name="base_link_visual_0" file="base_link_visual_0.stl" scale="0.001 0.001 0.001" />
     <mesh name="rotor_0_vis" file="rotor_0_vis.stl" />
     <mesh name="rotor_1_vis" file="rotor_1_vis.stl" />
     <mesh name="rotor_2_vis" file="rotor_2_vis.stl" />
     <mesh name="rotor_3_vis" file="rotor_3_vis.stl" />
-    <mesh name="rotor_4_vis" file="rotor_4_vis.stl" />
-    <mesh name="left_elevon_visual_0" file="left_elevon_visual_0.stl" />
-    <mesh name="right_elevon_visual_0" file="right_elevon_visual_0.stl" />
+    <mesh name="rotor_4_vis" file="rotor_4_vis.stl" scale="0.8 0.8 0.8" />
+    <mesh name="left_elevon_visual_0" file="left_elevon_visual_0.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_elevon_visual_0" file="right_elevon_visual_0.stl" scale="0.001 0.001 0.001" />
   </asset>
   <worldbody>
     <body name="base_link" pos="0 0 0.12">
       <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="5" diaginertia="0.811042 0.477708 0.341667" />
       <joint name="floating_base_joint" type="free" />
-      <geom type="mesh" mesh="base_link_visual_0" pos="0.53 -1.072 -0.1" quat="1.26918e-09 1.26918e-09 -0.707107 -0.707107" rgba="0.175 0.175 0.175 1" group="1" contype="0" conaffinity="0" />
-      <geom type="box" size="0.37 0.015 0.015" pos="0 0.35 0.01" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
-      <geom type="box" size="0.37 0.015 0.015" pos="0 -0.35 0.01" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
-      <geom type="cylinder" size="0.02 0.0175" pos="-0.35 0.35 0.045" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
-      <geom type="cylinder" size="0.02 0.0175" pos="-0.35 -0.35 0.045" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
-      <geom type="cylinder" size="0.02 0.0175" pos="0.35 -0.35 0.045" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
-      <geom type="cylinder" size="0.02 0.0175" pos="0.35 0.35 0.045" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
+      <geom type="mesh" mesh="base_link_visual_0" pos="0.53 -1.072 -0.1" quat="-3.60867e-12 -3.60869e-12 0.707107 0.707107" rgba="0.175 0.175 0.175 1" group="1" contype="0" conaffinity="0" />
       <geom type="box" size="0.275 1.072 0.025" pos="0 0 -0.07" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
       <body name="rotor_0" pos="0.35 -0.35 0.07">
-        <geom type="cylinder" size="0.1 0.0025" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
         <site name="rotor_joint_thrust0" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
       </body>
       <body name="rotor_1" pos="-0.35 0.35 0.07">
-        <geom type="cylinder" size="0.1 0.0025" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
         <site name="rotor_joint_thrust1" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
       </body>
       <body name="rotor_2" pos="0.35 0.35 0.07">
-        <geom type="cylinder" size="0.1 0.0025" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
         <site name="rotor_joint_thrust2" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
       </body>
       <body name="rotor_3" pos="-0.35 -0.35 0.07">
-        <geom type="cylinder" size="0.1 0.0025" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
         <site name="rotor_joint_thrust3" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
       </body>
-      <body name="rotor_4" pos="-0.22 0 0">
-        <geom type="cylinder" size="0.06 0.0025" pos="0 0 -0.04" rgba="0 0 0 0" group="3" contype="1" conaffinity="1" />
-        <site name="rotor_joint_thrust4" type="cylinder" size="0.01 0.005" pos="0 0 -0.04" rgba="1 0 0 0.5" />
+      <body name="rotor_4" pos="-0.22 0 0" quat="0.707388 0 0.706825 0">
+        <site name="rotor_joint_thrust4" type="cylinder" size="0.01 0.005" pos="0 0 0" rgba="1 0 0 0.5" />
       </body>
       <body name="left_elevon" pos="-0.18 0.6 -0.005" quat="0.991235 0 0 0.132113">
         <inertial pos="0 0.3 0" mass="1e-08" diaginertia="1e-06 1e-06 1e-06" />
-        <joint name="left_elevon_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.78 0.78" damping="1" />
-        <geom type="mesh" mesh="left_elevon_visual_0" pos="-0.105 0.004 -0.034" rgba="0 0 1 1" group="1" contype="0" conaffinity="0" />
+        <joint name="left_elevon_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.53 0.53" damping="1" />
+        <geom type="mesh" mesh="left_elevon_visual_0" pos="-0.083716 -0.594838 -0.029" quat="0.0934177 0.0934177 0.700909 0.700909" rgba="0 0 1 1" group="1" contype="0" conaffinity="0" />
       </body>
       <body name="right_elevon" pos="-0.18 -0.6 -0.005" quat="0.991235 0 0 -0.132113">
         <inertial pos="0 -0.6 0" mass="1e-08" diaginertia="1e-06 1e-06 1e-06" />
-        <joint name="right_elevon_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.78 0.78" damping="1" />
-        <geom type="mesh" mesh="right_elevon_visual_0" pos="-0.105 -0.004 -0.034" rgba="0 0 1 1" group="1" contype="0" conaffinity="0" />
+        <joint name="right_elevon_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.53 0.53" damping="1" />
+        <geom type="mesh" mesh="right_elevon_visual_0" pos="0.558052 -0.29618 -0.029" quat="0.0934177 0.0934177 -0.700909 -0.700909" rgba="0 0 1 1" group="1" contype="0" conaffinity="0" />
       </body>
       <body name="elevator" pos="-0.5 0 0">
         <inertial pos="-0.5 0 0" mass="1e-08" diaginertia="1e-06 1e-06 1e-06" />
-        <joint name="elevator_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.78 0.78" damping="1" />
+        <joint name="elevator_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.53 0.53" damping="1" />
+      </body>
+      <body name="rudder" pos="-0.5 0 0.05">
+        <inertial pos="-0.5 0 0.05" mass="1e-08" diaginertia="1e-06 1e-06 1e-06" />
+        <joint name="rudder_joint" pos="0 0 0" axis="1 0 0" limited="true" range="-0.01 0.01" damping="1" />
       </body>
       <site name="base_link_origin" type="sphere" size="0.01" pos="0 0 0" rgba="1 0 0 0.5" />
       <site name="rotor_offset_0" type="sphere" size="0.005" pos="0.350000 -0.350000 0.070000" rgba="0 0 1 0.5" />
       <site name="rotor_offset_1" type="sphere" size="0.005" pos="-0.350000 0.350000 0.070000" rgba="0 0 1 0.5" />
       <site name="rotor_offset_2" type="sphere" size="0.005" pos="0.350000 0.350000 0.070000" rgba="0 0 1 0.5" />
       <site name="rotor_offset_3" type="sphere" size="0.005" pos="-0.350000 -0.350000 0.070000" rgba="0 0 1 0.5" />
-      <site name="rotor_offset_4" type="sphere" size="0.005" pos="-0.220000 0.000000 -0.040000" rgba="0 0 1 0.5" />
+      <site name="rotor_offset_4" type="sphere" size="0.005" pos="-0.220000 0.000000 0.000000" rgba="0 0 1 0.5" />
     </body>
     <body name="rotor_0_vis" pos="0.35 -0.35 0.19" quat="1 0 0 0" mocap="true">
       <geom type="mesh" mesh="rotor_0_vis" rgba="0 0 1 1" group="1" contype="0" conaffinity="0" />
@@ -73,13 +66,13 @@
       <geom type="mesh" mesh="rotor_1_vis" rgba="0 0 1 1" group="1" contype="0" conaffinity="0" />
     </body>
     <body name="rotor_2_vis" pos="0.35 0.35 0.19" quat="1 0 0 0" mocap="true">
-      <geom type="mesh" mesh="rotor_2_vis" rgba="0 0 1 1" group="1" contype="0" conaffinity="0" />
+      <geom type="mesh" mesh="rotor_2_vis" rgba="0.175 0.175 0.175 1" group="1" contype="0" conaffinity="0" />
     </body>
     <body name="rotor_3_vis" pos="-0.35 -0.35 0.19" quat="1 0 0 0" mocap="true">
-      <geom type="mesh" mesh="rotor_3_vis" rgba="0 0 1 1" group="1" contype="0" conaffinity="0" />
+      <geom type="mesh" mesh="rotor_3_vis" rgba="0.175 0.175 0.175 1" group="1" contype="0" conaffinity="0" />
     </body>
-    <body name="rotor_4_vis" pos="-0.22 0 0.08" quat="1 0 0 0" mocap="true">
-      <geom type="mesh" mesh="rotor_4_vis" quat="0.707107 0 0.707107 0" rgba="0 0 1 1" group="1" contype="0" conaffinity="0" />
+    <body name="rotor_4_vis" pos="-0.22 0 0.12" quat="0.707388225 0 0.706825225 0" mocap="true">
+      <geom type="mesh" mesh="rotor_4_vis" pos="0 0 -0.04" rgba="0 0 1 1" group="1" contype="0" conaffinity="0" />
     </body>
   </worldbody>
   <sensor>
@@ -91,12 +84,12 @@
     <magnetometer name="magnetometer" site="base_link_origin" />
   </sensor>
   <actuator>
-    <position name="left_elevon_ctrl" kp="45" joint="left_elevon_joint" ctrlrange="-0.78 0.78" ctrllimited="true" />
-    <position name="right_elevon_ctrl" kp="45" joint="right_elevon_joint" ctrlrange="-0.78 0.78" ctrllimited="true" />
-    <position name="elevator_ctrl" kp="45" joint="elevator_joint" ctrlrange="-0.78 0.78" ctrllimited="true" />
+    <position name="left_elevon_ctrl" kp="45" joint="left_elevon_joint" ctrlrange="-0.53 0.53" ctrllimited="true" />
+    <position name="right_elevon_ctrl" kp="45" joint="right_elevon_joint" ctrlrange="-0.53 0.53" ctrllimited="true" />
+    <position name="elevator_ctrl" kp="45" joint="elevator_joint" ctrlrange="-0.53 0.53" ctrllimited="true" />
   </actuator>
   <keyframe>
-    <key name="home" qpos="0 0 0.12000000000000001 1 0 0 0 0 0 0" />
+    <key name="home" qpos="0 0 0.12000000000000001 1 0 0 0 0 0 0 0" />
   </keyframe>
   <contact>
     <exclude body1="base_link" body2="rotor_0" />
@@ -135,5 +128,14 @@
     <exclude body1="elevator" body2="rotor_4" />
     <exclude body1="elevator" body2="left_elevon" />
     <exclude body1="elevator" body2="right_elevon" />
+    <exclude body1="base_link" body2="rudder" />
+    <exclude body1="rudder" body2="rotor_0" />
+    <exclude body1="rudder" body2="rotor_1" />
+    <exclude body1="rudder" body2="rotor_2" />
+    <exclude body1="rudder" body2="rotor_3" />
+    <exclude body1="rudder" body2="rotor_4" />
+    <exclude body1="rudder" body2="left_elevon" />
+    <exclude body1="rudder" body2="right_elevon" />
+    <exclude body1="rudder" body2="elevator" />
   </contact>
 </mujoco>

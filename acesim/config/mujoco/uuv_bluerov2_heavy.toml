@@ -5,9 +5,9 @@ mode = "hil"
 
 [params.px4_fusion.hil]
 hil_sensor_rate_hz = 250.0
-mag_rate_hz = 84.0
-baro_rate_hz = 42.0
-gps_rate_hz = 5.0
+mag_rate_hz = 100.0
+baro_rate_hz = 50.0
+gps_rate_hz = 30.0
 
 [params.visual_stream]
 enabled = true
@@ -23,9 +23,9 @@ buoyancy_origin_b = [0.0, 0.0, 0.02]
 buoyancy_compensation = 1.0
 buoyancy_height_scale_limit = 0.05
 water_surface_z_nwu = 2.0
-rotor_direction = [1.0, 1.0, -1.0, -1.0, 1.0, -1.0, -1.0, 1.0]
-motor_constant = [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]
-moment_constant = [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
+rotor_direction = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+motor_constant = [10.0, 10.0, -10.0, -10.0, 10.0, -10.0, -10.0, 10.0]
+moment_constant = [0.01, 0.01, -0.01, -0.01, 0.01, -0.01, -0.01, 0.01]
 time_constant_up = 0.0125
 time_constant_down = 0.025
 max_rot_velocity = 1100.0

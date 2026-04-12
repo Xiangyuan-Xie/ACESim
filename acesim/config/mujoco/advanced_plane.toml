@@ -1,0 +1,117 @@
+[params]
+
+[params.px4_fusion]
+mode = "hil"
+
+[params.px4_fusion.hil]
+hil_sensor_rate_hz = 250.0
+mag_rate_hz = 100.0
+baro_rate_hz = 50.0
+gps_rate_hz = 30.0
+
+[params.visual_stream]
+enabled = true
+rate_hz = 120.0
+zmq_endpoint = "tcp://0.0.0.0:5602"
+
+[params.fw]
+model = "advanced_plane"
+thrust_motor_constant = 8.54858e-06
+thrust_moment_constant = 0.01
+thrust_time_constant_up = 0.0125
+thrust_time_constant_down = 0.025
+thrust_max_rot_velocity = 3500.0
+thrust_max_relative_airspeed_mps = 80.0
+thrust_rotor_drag_coeff = 8.06428e-05
+thrust_rolling_moment_coeff = 1e-06
+thrust_rotor_direction = 1.0
+linear_damping = 0.0
+angular_damping = 0.0
+
+[params.fw.controls]
+throttle_channel_index = 4
+surface_channel_indices = [2, 3, 8, 5, 6, 7]
+surface_channel_signs = [1.0, -1.0, -1.0, 1.0, 1.0, -1.0]
+
+[params.fw.advanced]
+alpha0 = 0.0
+cl0 = 0.15188
+cla = 5.015
+clb = 0.0
+cyb = -0.258244
+cd0 = 0.029
+cem0 = 0.075
+cema = -0.463966
+cemb = 0.0
+cella = 0.0
+cellb = -0.03925
+cena = 0.0
+cenb = 0.100826
+cdp = 0.0
+cyp = 0.065861
+clp = 0.0
+cellp = -0.487407
+cemp = 0.0
+cenp = -0.040416
+cdq = 0.055166
+cyq = 0.0
+clq = 7.971792
+cellq = 0.0
+cemq = -12.14014
+cenq = 0.0
+cdr = 0.0
+cyr = 0.230299
+clr = 0.0
+cellr = 0.078165
+cemr = 0.0
+cenr = -0.089947
+alpha_stall = 0.3391428111
+area = 0.8704
+aspect_ratio = 6.5
+efficiency = 0.97
+mac = 0.352
+air_density = 1.2041
+ref_pt = [-0.192, 0.0, 0.0]
+sigmoid_m = 15.0
+cd_fp_k1 = -3.0
+cd_fp_k2 = -0.25
+
+[[params.fw.advanced.control_surfaces]]
+joint_name = "left_elevon_joint"
+direction = 1.0
+cd_ctrl = -0.000059
+cy_ctrl = 0.000171
+cl_ctrl = -0.01194
+cell_ctrl = -0.003331
+cem_ctrl = 0.001498
+cen_ctrl = -0.000057
+
+[[params.fw.advanced.control_surfaces]]
+joint_name = "right_elevon_joint"
+direction = 1.0
+cd_ctrl = -0.000059
+cy_ctrl = -0.000171
+cl_ctrl = -0.01194
+cell_ctrl = 0.003331
+cem_ctrl = 0.001498
+cen_ctrl = 0.000057
+
+[[params.fw.advanced.control_surfaces]]
+joint_name = "elevator_joint"
+direction = -1.0
+cd_ctrl = 0.000274
+cy_ctrl = 0.0
+cl_ctrl = 0.010696
+cell_ctrl = 0.0
+cem_ctrl = -0.025798
+cen_ctrl = 0.0
+
+[[params.fw.advanced.control_surfaces]]
+joint_name = "rudder_joint"
+direction = 1.0
+cd_ctrl = 0.0
+cy_ctrl = -0.003913
+cl_ctrl = 0.0
+cell_ctrl = -0.000257
+cem_ctrl = 0.0
+cen_ctrl = 0.001613

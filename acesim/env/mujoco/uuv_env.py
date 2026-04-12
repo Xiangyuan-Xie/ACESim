@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
-import mujoco
 import numpy as np
 from scipy.spatial.transform import Rotation
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.px4_mj_env import PX4MJEnv
+from acesim.utils.dynamics import first_order_response_step, idle_visual_speed_target
 
 
 @dataclass
@@ -63,11 +62,15 @@ class UUVEnv(PX4MJEnv):
         super().__init__(config_loader)
 
     def _initialize_vehicle_handles(self) -> None:
-        self._rotor_body_names, self._rotor_body_ids, self._rotor_indices = self._resolve_rotor_bodies()
+        self._rotor_body_names, self._rotor_body_ids, self._rotor_indices = self._resolve_named_rotor_bodies(
+            allow_visual_fallback=False
+        )
         assert self._rotor_body_ids, "UUV asset must define rotor_<i> bodies"
-        self._rotor_mocap_ids, self._rotor_offsets, self._rotor_mount_rot = self._resolve_visual_rotor_group(
-            self._rotor_indices,
-            body_ids=self._rotor_body_ids,
+        self._rotor_mocap_ids, self._rotor_offsets, self._rotor_visual_offsets, self._rotor_mount_rot = (
+            self._resolve_visual_rotor_group(
+                self._rotor_indices,
+                body_ids=self._rotor_body_ids,
+            )
         )
         self._rotor_count = len(self._rotor_body_ids)
         assert self._params.rotor_direction.size == self._rotor_count
@@ -83,37 +86,6 @@ class UUVEnv(PX4MJEnv):
         self._applied_actuator_controls = np.zeros(self._rotor_count, dtype=float)
         self._rotor_angle = np.zeros(self._rotor_count, dtype=float)
 
-    def _resolve_rotor_bodies(self) -> tuple[list[str], list[int], list[int]]:
-        site_indices = []
-        for site_id in range(self._mj_model.nsite):
-            name = mujoco.mj_id2name(self._mj_model, mujoco.mjtObj.mjOBJ_SITE, site_id)
-            if not name:
-                continue
-            match = re.fullmatch(r"rotor_offset_(\d+)", name)
-            if match:
-                site_indices.append(int(match.group(1)))
-
-        body_indices = []
-        for body_id in range(self._mj_model.nbody):
-            name = mujoco.mj_id2name(self._mj_model, mujoco.mjtObj.mjOBJ_BODY, body_id)
-            if not name:
-                continue
-            match = re.fullmatch(r"rotor_(\d+)(_vis)?", name)
-            if match:
-                body_indices.append(int(match.group(1)))
-
-        rotor_indices = sorted(set(site_indices)) if site_indices else sorted(set(body_indices))
-        body_names: list[str] = []
-        body_ids: list[int] = []
-        valid_indices: list[int] = []
-        for idx in rotor_indices:
-            raw_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_BODY, f"rotor_{idx}")
-            if raw_id >= 0:
-                body_names.append(f"rotor_{idx}")
-                body_ids.append(raw_id)
-                valid_indices.append(idx)
-        return body_names, body_ids, valid_indices
-
     def _actuator_channel_count(self) -> int:
         return self._rotor_count
 
@@ -122,10 +94,13 @@ class UUVEnv(PX4MJEnv):
         self._desired_rotor_angular_velocity = self._applied_actuator_controls * self._params.max_rot_velocity
 
     def _update_rotor_speed_state(self, dt_s: float) -> None:
-        for i in range(self._rotor_count):
-            diff = self._desired_rotor_angular_velocity[i] - self._rotor_angular_velocity[i]
-            tc = self._params.time_constant_up if diff > 0.0 else self._params.time_constant_down
-            self._rotor_angular_velocity[i] += diff * (1.0 - np.exp(-dt_s / tc))
+        self._rotor_angular_velocity = first_order_response_step(
+            self._rotor_angular_velocity,
+            self._desired_rotor_angular_velocity,
+            dt_s,
+            self._params.time_constant_up,
+            self._params.time_constant_down,
+        )
 
     def _compute_hydrodynamic_wrench(
         self, body_velocity_flu: np.ndarray, body_rates_flu: np.ndarray
@@ -204,28 +179,18 @@ class UUVEnv(PX4MJEnv):
         rotor_positions_w, rotor_force_w, rotor_moment_w = self._compute_thruster_wrenches(
             base_pos, rb, body_velocity_flu
         )
-        for i in range(self._rotor_count):
-            mujoco.mj_applyFT(
-                self._mj_model,
-                self._mj_data,
-                rotor_force_w[i],
-                rotor_moment_w[i],
-                rotor_positions_w[i],
-                self._base_link_id,
-                self._mj_data.qfrc_applied,
-            )
+        self._apply_world_wrenches(rotor_positions_w, rotor_force_w, rotor_moment_w)
 
     def _compute_visual_rotor_speed(self, rotor_idx: int, armed: bool) -> float:
         physical_speed = abs(float(self._rotor_angular_velocity[rotor_idx]))
         actuator_output = abs(float(self._applied_actuator_controls[rotor_idx]))
-        if not armed:
-            return physical_speed
-        if actuator_output <= 0.0:
-            return max(physical_speed, self._params.idle_visual_speed)
-        blend_end = self._params.low_speed_blend_end
-        blend_weight = float(np.clip(1.0 - physical_speed / blend_end, 0.0, 1.0))
-        low_speed_target = blend_weight * self._params.idle_visual_speed + (1.0 - blend_weight) * physical_speed
-        return max(physical_speed, low_speed_target)
+        return idle_visual_speed_target(
+            physical_speed=physical_speed,
+            actuator_output=actuator_output,
+            armed=armed,
+            idle_speed=self._params.idle_visual_speed,
+            low_speed_blend_end=self._params.low_speed_blend_end,
+        )
 
     def _update_vehicle_visuals(self) -> None:
         armed = self._px4_transport.update_arming_state()
@@ -236,7 +201,7 @@ class UUVEnv(PX4MJEnv):
         spin_direction = np.where(self._rotor_angular_velocity >= 0.0, 1.0, -1.0)
         self._advance_visual_rotors(
             mocap_ids=self._rotor_mocap_ids,
-            offsets_b=self._rotor_offsets,
+            offsets_b=self._rotor_visual_offsets,
             mount_rot=self._rotor_mount_rot,
             rotor_angles=self._rotor_angle,
             visual_speeds=self._visual_rotor_angular_velocity,

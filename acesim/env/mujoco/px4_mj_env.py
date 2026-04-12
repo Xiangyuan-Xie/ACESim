@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Sequence
 
 import mujoco
@@ -71,13 +72,67 @@ class PX4MJEnv(MJEnv):
     def _initialize_vehicle_handles(self) -> None:
         """Resolve vehicle-specific joints, bodies, and runtime state."""
 
+    def _resolve_named_rotor_bodies(
+        self,
+        *,
+        allow_visual_fallback: bool,
+    ) -> tuple[list[str], list[int], list[int]]:
+        """Resolve rotor bodies from shared asset naming conventions.
+
+        This helper intentionally stays in the MuJoCo layer because it depends on
+        MJCF body/site discovery rules rather than on backend-independent math.
+        ``allow_visual_fallback`` exists for legacy multirotor assets whose
+        physical rotors only exist as mocap visual bodies, while UUV assets still
+        require physical ``rotor_<i>`` bodies for force application.
+        """
+
+        site_indices: list[int] = []
+        for site_id in range(self._mj_model.nsite):
+            name = mujoco.mj_id2name(self._mj_model, mujoco.mjtObj.mjOBJ_SITE, site_id)
+            if not name:
+                continue
+            match = re.fullmatch(r"rotor_offset_(\d+)", name)
+            if match:
+                site_indices.append(int(match.group(1)))
+
+        body_indices: list[int] = []
+        for body_id in range(self._mj_model.nbody):
+            name = mujoco.mj_id2name(self._mj_model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+            if not name:
+                continue
+            match = re.fullmatch(r"rotor_(\d+)(_vis)?", name)
+            if match:
+                body_indices.append(int(match.group(1)))
+
+        rotor_indices = sorted(set(site_indices)) if site_indices else sorted(set(body_indices))
+        body_names: list[str] = []
+        body_ids: list[int] = []
+        valid_indices: list[int] = []
+        for rotor_index in rotor_indices:
+            body_name = f"rotor_{rotor_index}"
+            body_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            if body_id >= 0:
+                body_names.append(body_name)
+                body_ids.append(body_id)
+                valid_indices.append(rotor_index)
+                continue
+            if not allow_visual_fallback:
+                continue
+            visual_name = f"rotor_{rotor_index}_vis"
+            visual_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_BODY, visual_name)
+            if visual_id >= 0:
+                body_names.append(visual_name)
+                body_ids.append(visual_id)
+                valid_indices.append(rotor_index)
+        return body_names, body_ids, valid_indices
+
     def _resolve_visual_rotor_group(
         self,
         rotor_indices: Sequence[int],
         *,
         body_ids: Sequence[int] | None = None,
-    ) -> tuple[list[int], np.ndarray, list[Rotation]]:
-        """Resolve mocap ids, base-relative offsets, and static mount rotations for rotor visuals."""
+    ) -> tuple[list[int], np.ndarray, np.ndarray, list[Rotation]]:
+        """Resolve physics offsets plus mocap mount poses for rotor visuals."""
 
         resolved_body_ids = list(body_ids) if body_ids is not None else []
         if not resolved_body_ids:
@@ -88,20 +143,38 @@ class PX4MJEnv(MJEnv):
                 resolved_body_ids.append(body_id)
 
         mocap_ids: list[int] = []
-        offsets: list[np.ndarray] = []
+        force_offsets: list[np.ndarray] = []
+        visual_offsets: list[np.ndarray] = []
         mount_rot: list[Rotation] = []
         for rotor_index, body_id in zip(rotor_indices, resolved_body_ids):
             vis_body_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_BODY, f"rotor_{rotor_index}_vis")
             site_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_SITE, f"rotor_offset_{rotor_index}")
-            offset = (
+            force_offset = (
                 self._mj_model.site_pos[site_id].copy()
                 if site_id >= 0
                 else self._resolve_body_offset_from_base(body_id)
             )
+            visual_body_id = vis_body_id if vis_body_id >= 0 else body_id
+            if vis_body_id >= 0:
+                vis_pos = self._mj_model.body_pos[vis_body_id].copy()
+                vis_quat = self._mj_model.body_quat[vis_body_id].copy()
+                if (
+                    np.linalg.norm(vis_pos) <= 1e-9
+                    and np.linalg.norm(vis_quat - np.array([1.0, 0.0, 0.0, 0.0], dtype=float)) <= 1e-9
+                ):
+                    # Legacy multirotor assets keep mocap visual bodies at the world
+                    # origin and expect us to reuse the physical rotor mount pose.
+                    visual_body_id = body_id
             mocap_ids.append(self._mj_model.body_mocapid[vis_body_id] if vis_body_id >= 0 else -1)
-            offsets.append(np.asarray(offset, dtype=float))
-            mount_rot.append(self._resolve_body_rotation_from_base(body_id))
-        return mocap_ids, np.asarray(offsets, dtype=float), mount_rot
+            force_offsets.append(np.asarray(force_offset, dtype=float))
+            visual_offsets.append(self._resolve_body_offset_from_base(visual_body_id))
+            mount_rot.append(self._resolve_body_rotation_from_base(visual_body_id))
+        return (
+            mocap_ids,
+            np.asarray(force_offsets, dtype=float),
+            np.asarray(visual_offsets, dtype=float),
+            mount_rot,
+        )
 
     def _advance_visual_rotors(
         self,
@@ -225,9 +298,16 @@ class PX4MJEnv(MJEnv):
             rotation = Rotation.from_quat(local_quat, scalar_first=True) * rotation
             current_id = int(self._mj_model.body_parentid[current_id])
 
-        if current_id != self._base_link_id:
-            raise ValueError(f"Body id {body_id} is not a descendant of base_link")
-        return rotation
+        if current_id == self._base_link_id:
+            return rotation
+
+        # Mocap-only visual bodies live at world scope in the generated MJCF.
+        # Fall back to the current world pose to recover their static transform
+        # relative to base_link.
+        base_quat = self._mj_data.xquat[self._base_link_id].copy()
+        body_quat = self._mj_data.xquat[body_id].copy()
+        rb_inv = Rotation.from_quat(base_quat, scalar_first=True).inv()
+        return rb_inv * Rotation.from_quat(body_quat, scalar_first=True)
 
     def _apply_body_wrench(
         self,
@@ -249,6 +329,30 @@ class PX4MJEnv(MJEnv):
             self._base_link_id,
             self._mj_data.qfrc_applied,
         )
+
+    def _apply_world_wrenches(
+        self,
+        positions_world_m: np.ndarray,
+        forces_world_n: np.ndarray,
+        moments_world_nm: np.ndarray,
+    ) -> None:
+        """Apply a batch of world-frame wrenches to ``base_link``.
+
+        Keeping this helper near the MuJoCo callback logic makes the force
+        application sites consistent without moving engine-specific API calls into
+        ``acesim.utils``.
+        """
+
+        for position_world, force_world, moment_world in zip(positions_world_m, forces_world_n, moments_world_nm):
+            mujoco.mj_applyFT(
+                self._mj_model,
+                self._mj_data,
+                np.asarray(force_world, dtype=float),
+                np.asarray(moment_world, dtype=float),
+                np.asarray(position_world, dtype=float),
+                self._base_link_id,
+                self._mj_data.qfrc_applied,
+            )
 
     def _actuator_channel_count(self) -> int:
         raise NotImplementedError
