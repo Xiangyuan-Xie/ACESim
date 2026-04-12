@@ -6,11 +6,11 @@ import types
 import unittest
 from pathlib import Path
 from types import ModuleType
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 
-def _load_launch_common_module():
+def _load_launch_common_module() -> ModuleType:
     module_name = "_test_acesim_ros2_launch_common"
     for name in [
         module_name,
@@ -22,11 +22,11 @@ def _load_launch_common_module():
     ]:
         sys.modules.pop(name, None)
 
-    launch_module = types.ModuleType("launch")
-    launch_actions_module = types.ModuleType("launch.actions")
-    launch_event_handlers_module = types.ModuleType("launch.event_handlers")
-    launch_ros_module = types.ModuleType("launch_ros")
-    launch_ros_actions_module = types.ModuleType("launch_ros.actions")
+    launch_module: Any = types.ModuleType("launch")
+    launch_actions_module: Any = types.ModuleType("launch.actions")
+    launch_event_handlers_module: Any = types.ModuleType("launch.event_handlers")
+    launch_ros_module: Any = types.ModuleType("launch_ros")
+    launch_ros_actions_module: Any = types.ModuleType("launch_ros.actions")
 
     class ExecuteProcess:
         def __init__(self, *, cmd=None, cwd=None, additional_env=None, output=None, **kwargs):
@@ -50,6 +50,11 @@ def _load_launch_common_module():
             self.target_action = target_action
             self.on_start = on_start
 
+    class OnProcessExit:
+        def __init__(self, *, target_action, on_exit):
+            self.target_action = target_action
+            self.on_exit = on_exit
+
     class Node:
         def __init__(self, *, package, executable, arguments=None, output=None, **kwargs):
             self.package = package
@@ -61,6 +66,7 @@ def _load_launch_common_module():
     launch_actions_module.ExecuteProcess = ExecuteProcess
     launch_actions_module.RegisterEventHandler = RegisterEventHandler
     launch_actions_module.TimerAction = TimerAction
+    launch_event_handlers_module.OnProcessExit = OnProcessExit
     launch_event_handlers_module.OnProcessStart = OnProcessStart
     launch_ros_actions_module.Node = Node
 
@@ -84,8 +90,9 @@ def _load_launch_common_module():
         / "launch_common.py"
     )
     spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to create module spec for {module_path}")
     module = importlib.util.module_from_spec(spec)
-    assert spec is not None and spec.loader is not None
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
@@ -125,7 +132,7 @@ class _FakePX4SensorParams:
         return cls()
 
 
-class Ros2LaunchCommonTests(unittest.TestCase):
+class ROS2LaunchCommonTests(unittest.TestCase):
     launch_common: ClassVar[ModuleType]
 
     @classmethod
@@ -138,14 +145,14 @@ class Ros2LaunchCommonTests(unittest.TestCase):
             "x500": {"PX4_SYS_AUTOSTART": "10016", "PX4_SIM_MODEL": "none"},
             "x500_arm2x": {"PX4_SYS_AUTOSTART": "10016", "PX4_SIM_MODEL": "none"},
             "typhoon_h480": {"PX4_SYS_AUTOSTART": "6011", "PX4_SIM_MODEL": "none"},
-            "plane": {
-                "PX4_SYS_AUTOSTART": "4008",
+            "advanced_plane": {
+                "PX4_SYS_AUTOSTART": "1039",
                 "PX4_SIM_MODEL": "none",
                 "PX4_SIMULATOR": "none",
                 "PX4_PARAM_SIM_GZ_EN": "0",
             },
             "standard_vtol": {
-                "PX4_SYS_AUTOSTART": "4004",
+                "PX4_SYS_AUTOSTART": "1040",
                 "PX4_SIM_MODEL": "none",
                 "PX4_SIMULATOR": "none",
                 "PX4_PARAM_SIM_GZ_EN": "0",
@@ -168,17 +175,20 @@ class Ros2LaunchCommonTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 ValueError,
                 "Unsupported PX4 startup asset: unknown_vehicle. Supported assets: "
-                "iris, plane, standard_vtol, typhoon_h480, uuv_bluerov2_heavy, x500, x500_arm2x",
+                "advanced_plane, iris, standard_vtol, typhoon_h480, uuv_bluerov2_heavy, x500, x500_arm2x",
             ):
                 self.launch_common._resolve_px4_startup_env()
 
     def test_build_launch_entities_omits_arm_nodes_for_non_mc_arm(self) -> None:
-        with patch.object(self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("plane", env_type="fw")):
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
             with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
                 entities = self.launch_common.build_launch_entities("/tmp/px4", enable_px4_post_start_setup=False)
 
-        node_execs = {getattr(entity, "executable", None) for entity in entities}
-        commands = [getattr(entity, "cmd", None) for entity in entities if hasattr(entity, "cmd")]
+        startup_entities = entities[1].event_handler.on_exit
+        node_execs = {getattr(entity, "executable", None) for entity in startup_entities}
+        commands = [getattr(entity, "cmd", None) for entity in startup_entities if hasattr(entity, "cmd")]
         self.assertNotIn("arm_state_zmq_bridge", node_execs)
         self.assertFalse(any(command and "/arm/command" in " ".join(command) for command in commands))
 
@@ -189,10 +199,26 @@ class Ros2LaunchCommonTests(unittest.TestCase):
             with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
                 entities = self.launch_common.build_launch_entities("/tmp/px4", enable_px4_post_start_setup=False)
 
-        node_execs = {getattr(entity, "executable", None) for entity in entities}
-        commands = [getattr(entity, "cmd", None) for entity in entities if hasattr(entity, "cmd")]
+        startup_entities = entities[1].event_handler.on_exit
+        node_execs = {getattr(entity, "executable", None) for entity in startup_entities}
+        commands = [getattr(entity, "cmd", None) for entity in startup_entities if hasattr(entity, "cmd")]
         self.assertIn("arm_state_zmq_bridge", node_execs)
         self.assertTrue(any(command and "/arm/command" in " ".join(command) for command in commands))
+
+    def test_build_launch_entities_force_export_px4_non_gz_overrides(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities("/tmp/px4", enable_px4_post_start_setup=False)
+
+        startup_entities = entities[1].event_handler.on_exit
+        px4_process = next(entity for entity in startup_entities if getattr(entity, "cwd", None) == "/tmp/px4")
+        command_text = " ".join(px4_process.cmd)
+        self.assertIn("PX4_SIM_MODEL=none", command_text)
+        self.assertIn("PX4_SIMULATOR=none", command_text)
+        self.assertIn("PX4_PARAM_SIM_GZ_EN=0", command_text)
+        self.assertIn("make px4_sitl none", command_text)
 
 
 if __name__ == "__main__":

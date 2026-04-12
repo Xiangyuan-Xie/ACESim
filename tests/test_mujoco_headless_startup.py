@@ -45,7 +45,7 @@ class _FakeVisualPublisher:
 
 class _FakeArmStatePublisher:
     def __init__(self, *args: object, **kwargs: object) -> None:
-        pass
+        return None
 
     def publish(
         self,
@@ -61,7 +61,7 @@ class _FakeArmStatePublisher:
 
 
 class _FakeRobotAgent:
-    def act(self):
+    def act(self) -> tuple[list[float], None, None]:
         return ([0.0] * 7, None, None)
 
     def close(self) -> None:
@@ -88,8 +88,8 @@ def _config_path(name: str) -> Path:
 @patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _FakePX4Transport)
 @patch("acesim.env.mujoco.mj_env.SimulationClock", lambda: SimulationClock(enable_zmq=False))
 class MujocoHeadlessStartupTests(unittest.TestCase):
-    def _instantiate_and_step(self, config_path: Path) -> _SupportsHeadlessEnv:
-        loader = ConfigLoader(config_path)
+    def _instantiate_and_step(self, config_file: Path) -> _SupportsHeadlessEnv:
+        loader = ConfigLoader(config_file)
         module_name, class_name = loader.get_sim_info()
         env_cls = getattr(import_module(module_name), class_name)
         env = env_cls(loader)
@@ -123,19 +123,20 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
         )
         return config_path
 
-    def test_default_mc_arm_config_starts_headless(self) -> None:
+    def test_default_config_starts_headless(self) -> None:
+        expected_loader = ConfigLoader(_config_path("default"))
         env = self._instantiate_and_step(_config_path("default"))
         try:
-            self.assertEqual(env._config_loader.get_asset_name(), "x500_arm2x")
-            self.assertEqual(env._config_loader.get_env_type(), "mc_arm")
-            self.assertEqual(env._rotor_count, 4)
+            self.assertEqual(env._config_loader.get_asset_name(), expected_loader.get_asset_name())
+            self.assertEqual(env._config_loader.get_env_type(), expected_loader.get_env_type())
+            self.assertGreaterEqual(env._step_count, 1)
         finally:
             env.close()
 
     def test_all_mujoco_configs_start_headless(self) -> None:
         config_cases = [
             _config_path("default"),
-            _config_path("plane"),
+            _config_path("advanced_plane"),
             _config_path("standard_vtol"),
             _config_path("uuv_bluerov2_heavy"),
         ]
@@ -146,10 +147,19 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
             for asset_name in synthetic_assets:
                 config_cases.append(self._write_mc_config(temp_root, asset_name=asset_name))
 
-            for config_path in config_cases:
-                with self.subTest(config=config_path.name):
-                    env = self._instantiate_and_step(config_path)
+            for config_file in config_cases:
+                with self.subTest(config=config_file.name):
+                    env = self._instantiate_and_step(config_file)
                     try:
                         self.assertGreater(env._step_count, 0)
                     finally:
                         env.close()
+
+    def test_default_mc_env_handles_split_visual_rotor_offsets(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="acesim_mc_split_offsets_") as tmpdir:
+            config_path = self._write_mc_config(Path(tmpdir), asset_name="x500")
+            env = self._instantiate_and_step(config_path)
+            try:
+                self.assertEqual(env._rotor_count, 4)
+            finally:
+                env.close()

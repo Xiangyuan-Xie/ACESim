@@ -138,6 +138,36 @@ class _FakeTransport:
 
 
 class PX4TransportSchedulerTests(unittest.TestCase):
+    def _make_scheduler(
+        self,
+        *,
+        diff_pressure_hpa: float | None,
+        temperature_celsius: float = 25.0,
+    ) -> tuple[SimulationClock, _FakeTransport, PX4SensorScheduler]:
+        clock = SimulationClock(enable_zmq=False)
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="hil",
+            hil_sensor_rate_hz=250.0,
+            mag_rate_hz=84.0,
+            baro_rate_hz=42.0,
+            gps_rate_hz=5.0,
+        )
+
+        def read_sample() -> PX4SensorSample:
+            return PX4SensorSample(
+                accel_frd=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro_frd=np.zeros(3, dtype=float),
+                mag_frd=np.array([0.2, 0.0, -0.4], dtype=float),
+                position_world_m=np.array([0.0, 0.0, 1.0], dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+                diff_pressure_hpa=diff_pressure_hpa,
+                temperature_celsius=temperature_celsius,
+            )
+
+        return clock, transport, PX4SensorScheduler(transport, clock, params, read_sample)
+
     @patch("acesim.utils.px4_transport.mavutil.mavlink_connection")
     def test_signed_hil_actuator_controls_are_accepted(self, mock_connection: MagicMock) -> None:
         connection = _FakeConnection()
@@ -157,29 +187,7 @@ class PX4TransportSchedulerTests(unittest.TestCase):
         transport.close()
 
     def test_scheduler_sets_diff_pressure_field_when_sample_provides_it(self) -> None:
-        clock = SimulationClock(enable_zmq=False)
-        transport = _FakeTransport()
-        params = PX4SensorParams(
-            fusion_mode="hil",
-            hil_sensor_rate_hz=250.0,
-            mag_rate_hz=84.0,
-            baro_rate_hz=42.0,
-            gps_rate_hz=5.0,
-        )
-
-        def read_sample() -> PX4SensorSample:
-            return PX4SensorSample(
-                accel_frd=np.array([0.0, 0.0, -9.81], dtype=float),
-                gyro_frd=np.zeros(3, dtype=float),
-                mag_frd=np.array([0.2, 0.0, -0.4], dtype=float),
-                position_world_m=np.array([0.0, 0.0, 1.0], dtype=float),
-                velocity_world_mps=np.zeros(3, dtype=float),
-                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-                diff_pressure_hpa=3.2,
-                temperature_celsius=17.5,
-            )
-
-        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        clock, transport, scheduler = self._make_scheduler(diff_pressure_hpa=3.2, temperature_celsius=17.5)
         clock.advance_us(4_000)
         sent = scheduler.update()
 
@@ -195,28 +203,7 @@ class PX4TransportSchedulerTests(unittest.TestCase):
         clock.close()
 
     def test_scheduler_keeps_multirotor_sensor_fields_without_diff_pressure(self) -> None:
-        clock = SimulationClock(enable_zmq=False)
-        transport = _FakeTransport()
-        params = PX4SensorParams(
-            fusion_mode="hil",
-            hil_sensor_rate_hz=250.0,
-            mag_rate_hz=84.0,
-            baro_rate_hz=42.0,
-            gps_rate_hz=5.0,
-        )
-
-        def read_sample() -> PX4SensorSample:
-            return PX4SensorSample(
-                accel_frd=np.array([0.0, 0.0, -9.81], dtype=float),
-                gyro_frd=np.zeros(3, dtype=float),
-                mag_frd=np.array([0.2, 0.0, -0.4], dtype=float),
-                position_world_m=np.array([0.0, 0.0, 1.0], dtype=float),
-                velocity_world_mps=np.zeros(3, dtype=float),
-                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
-                diff_pressure_hpa=None,
-            )
-
-        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        clock, transport, scheduler = self._make_scheduler(diff_pressure_hpa=None)
         clock.advance_us(4_000)
         scheduler.update()
 

@@ -53,19 +53,19 @@ class _FakeVisualPublisher:
         return None
 
 
-class _MuJoCoModelLike(Protocol):
+class _MujocoModelLike(Protocol):
     sensor_adr: np.ndarray
     sensor_dim: np.ndarray
 
 
-class _MuJoCoDataLike(Protocol):
+class _MujocoDataLike(Protocol):
     sensordata: np.ndarray
 
 
 class _SupportsSensorSeeding(Protocol):
     _sensor_id_map: dict[str, int]
-    _mj_model: _MuJoCoModelLike
-    _mj_data: _MuJoCoDataLike
+    _mj_model: _MujocoModelLike
+    _mj_data: _MujocoDataLike
 
 
 def _config_path(name: str) -> Path:
@@ -93,8 +93,8 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         _set_sensor(env, "accel", np.array([0.0, 0.0, 9.81], dtype=float))
         _set_sensor(env, "mag", np.array([2.73e-5, 0.0, -4.54e-5], dtype=float))
 
-    def test_plane_generates_expected_propulsion_and_control_moments(self) -> None:
-        env = FWEnv(ConfigLoader(_config_path("plane")))
+    def test_advanced_plane_generates_expected_propulsion_and_control_moments(self) -> None:
+        env = FWEnv(ConfigLoader(_config_path("advanced_plane")))
         try:
             self._seed_kinematics(env, pos=np.array([0.0, 0.0, 1.2]), linvel=np.array([15.0, 0.0, 0.0]))
 
@@ -120,7 +120,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         finally:
             env.close()
 
-    def test_standard_vtol_combines_lift_rotors_and_fixed_wing_effects(self) -> None:
+    def test_standard_vtol_combines_lift_rotors_puller_and_fixed_wing_effects(self) -> None:
         env = VTOLEnv(ConfigLoader(_config_path("standard_vtol")))
         try:
             self._seed_kinematics(env, pos=np.array([0.0, 0.0, 0.9]), linvel=np.zeros(3))
@@ -133,13 +133,14 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
 
             self._seed_kinematics(env, pos=np.array([0.0, 0.0, 0.9]), linvel=np.array([18.0, 0.0, 0.0]))
             env._handle_applied_actuator_controls(
-                np.array([0.0, 0.0, 0.0, 0.0, 1.0, 0.3, -0.3, 0.35, 0.0], dtype=float)
+                np.array([0.0, 0.0, 0.0, 0.0, 0.8, 0.3, -0.3, 0.35, 0.0], dtype=float)
             )
-            env._update_puller_speed(1.0)
-            prop_force_b, _ = env._compute_propeller_force(np.array([18.0, 0.0, 0.0], dtype=float))
             _, aero_moment = env._compute_aero_wrench()
-            self.assertGreater(prop_force_b[0], 0.0)
             self.assertGreater(np.linalg.norm(aero_moment), 1e-4)
+            env._update_puller_speed(1.0)
+            body_velocity_flu, _ = env._compute_apparent_body_velocity()
+            prop_force_b, _ = env._compute_propeller_force(body_velocity_flu)
+            self.assertGreater(prop_force_b[0], 0.0)
         finally:
             env.close()
 
