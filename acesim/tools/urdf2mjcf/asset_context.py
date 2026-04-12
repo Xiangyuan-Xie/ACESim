@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 
 
 @dataclass(frozen=True)
-class ConverterConfig:
+class AssetToolchainConfig:
+    """Stage-2 options for compiling ACESim URDF assets into MJCF."""
+
     target: str
     floating: bool = False
     decompose: bool = False
@@ -13,14 +17,16 @@ class ConverterConfig:
 
 
 @dataclass(frozen=True)
-class ConverterPaths:
+class AssetPaths:
+    """Resolved on-disk paths for a single ACESim asset target."""
+
     base_dir: Path
     urdf_path: Path
     mesh_dir: Path
     xml_path: Path
 
     @classmethod
-    def for_target(cls, target: str) -> "ConverterPaths":
+    def for_target(cls, target: str) -> "AssetPaths":
         base_dir = Path(__file__).resolve().parents[2] / "env" / "mujoco" / "asset"
         urdf_path = base_dir / target / f"{target}.urdf"
         return cls(

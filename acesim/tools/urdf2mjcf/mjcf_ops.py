@@ -9,9 +9,9 @@ import mujoco
 
 from acesim.utils.math import quat_mul, quat_rotate
 
-from .config import ConverterConfig, ConverterPaths
-from .px4_multirotor import rebuild_px4_multirotor
-from .xml_utils import add_collision_exclusions, indent_xml, inject_xml, sort_attributes
+from .asset_context import AssetPaths, AssetToolchainConfig
+from .runtime_handler_registry import runtime_handler_for_target
+from .xml_ops import add_collision_exclusions, indent_xml, inject_xml, sort_attributes
 
 XML_OPTION_TAG = textwrap.dedent("""
     <option
@@ -69,9 +69,9 @@ XML_ARM_ACTUATORS = textwrap.dedent("""
     </actuator>
     """).strip()
 
-PX4_TARGETS = {"plane", "standard_vtol", "uuv_bluerov2_heavy"}
+PX4_TARGETS = {"advanced_plane", "standard_vtol", "uuv_bluerov2_heavy"}
 FIXEDWING_ACTUATOR_SPECS = {
-    "plane": [
+    "advanced_plane": [
         ("rudder_ctrl", "rudder_joint", 40.0),
         ("left_flap_ctrl", "left_flap_joint", 40.0),
         ("right_flap_ctrl", "right_flap_joint", 40.0),
@@ -84,6 +84,22 @@ FIXEDWING_ACTUATOR_SPECS = {
         ("right_elevon_ctrl", "right_elevon_joint", 45.0),
         ("elevator_ctrl", "elevator_joint", 45.0),
     ],
+}
+
+PX4_PHYSICS_SITE_LOCAL_POSES = {
+    "advanced_plane": {
+        "rotor_4": [0.0, 0.0, 0.0],
+    },
+    "standard_vtol": {
+        "rotor_0": [0.0, 0.0, 0.0],
+        "rotor_1": [0.0, 0.0, 0.0],
+        "rotor_2": [0.0, 0.0, 0.0],
+        "rotor_3": [0.0, 0.0, 0.0],
+        "rotor_4": [0.0, 0.0, 0.0],
+    },
+    "uuv_bluerov2_heavy": {
+        **{f"rotor_{idx}": [0.0, 0.0, 0.0] for idx in range(8)},
+    },
 }
 
 
@@ -248,8 +264,8 @@ def probe_floor_penetration(xml_path: Path) -> float:
         probe_path.unlink(missing_ok=True)
 
 
-def calibrate_home_height(root: ET.Element, xml_path: Path, config: ConverterConfig) -> None:
-    if config.target not in {"x500", "iris", "typhoon_h480", "plane", "standard_vtol", "uuv_bluerov2_heavy"}:
+def calibrate_home_height(root: ET.Element, xml_path: Path, config: AssetToolchainConfig) -> None:
+    if config.target not in {"x500", "iris", "typhoon_h480", "advanced_plane", "standard_vtol", "uuv_bluerov2_heavy"}:
         return
     keyframe = root.find("keyframe")
     if keyframe is None:
@@ -270,15 +286,22 @@ def calibrate_home_height(root: ET.Element, xml_path: Path, config: ConverterCon
     indent_xml(root)
     ET.ElementTree(root).write(xml_path, encoding="utf-8", xml_declaration=True)
     min_floor_dist = probe_floor_penetration(xml_path)
-    if min_floor_dist != float("inf") and min_floor_dist < config.safety_margin:
+    if min_floor_dist == float("inf"):
+        return
+    if config.target == "advanced_plane":
+        target_floor_dist = 0.0
+        if abs(min_floor_dist - target_floor_dist) > 1e-6:
+            set_home_height(root, qpos[2] + (target_floor_dist - min_floor_dist))
+        return
+    if min_floor_dist < config.safety_margin:
         set_home_height(root, qpos[2] + (config.safety_margin - min_floor_dist))
 
 
 def postprocess_xml(
     xml_path: Path,
     *,
-    config: ConverterConfig,
-    paths: ConverterPaths,
+    config: AssetToolchainConfig,
+    paths: AssetPaths,
     initial_q: dict[str, float],
     height_offset: float = 0.0,
 ) -> None:
@@ -367,22 +390,8 @@ def postprocess_xml(
             offset_base[2] + rotated_local[2],
         ]
 
-    def compose_visual_center_world(
-        body_name: str, offset_local: list[float]
-    ) -> tuple[list[float], list[float]] | None:
-        world_pose = compose_to_world(body_name)
-        if world_pose is None:
-            return None
-        world_pos, world_quat = world_pose
-        rotated_local = quat_rotate(world_quat, offset_local)
-        return (
-            [
-                world_pos[0] + rotated_local[0],
-                world_pos[1] + rotated_local[1],
-                world_pos[2] + rotated_local[2],
-            ],
-            world_quat,
-        )
+    def compose_body_world_pose(body_name: str) -> tuple[list[float], list[float]] | None:
+        return compose_to_world(body_name)
 
     def align_rotor_visual_bodies() -> None:
         if worldbody is None:
@@ -393,8 +402,7 @@ def postprocess_xml(
             if not match:
                 continue
             physical_name = f"rotor_{match.group(1)}"
-            center_local = rotor_visual_center_local.get(physical_name, [0.0, 0.0, 0.0])
-            rotor_world_pose = compose_visual_center_world(physical_name, center_local)
+            rotor_world_pose = compose_body_world_pose(physical_name)
             if rotor_world_pose is None:
                 continue
             vis_body.set("pos", fmt_floats(rotor_world_pose[0]))
@@ -424,8 +432,12 @@ def postprocess_xml(
         else:
             inject_xml(root, XML_ARM_ACTUATORS, source="arm actuators")
 
+    family_handler = runtime_handler_for_target(config.target)
+
     if worldbody is not None:
-        rebuild_px4_multirotor(root, worldbody, config, paths)
+        # Runtime rewriting is family-specific: multirotors inject centered
+        # rotor visuals and custom meshes, while other families may be no-op.
+        family_handler.rewrite_runtime_model(root, worldbody, config, paths)
         body_parent, body_elem, body_transform = rebuild_body_maps(worldbody)
 
     if worldbody is not None:
@@ -440,6 +452,36 @@ def postprocess_xml(
                 )
             )
 
+        if base_body is not None and config.target == "advanced_plane":
+            sensor_site = next(
+                (site for site in base_body.findall("site") if site.get("name") == "base_link_sensor_origin"), None
+            )
+            if sensor_site is None:
+                base_body.append(
+                    ET.Element(
+                        "site",
+                        {
+                            "name": "base_link_sensor_origin",
+                            "type": "sphere",
+                            "size": "0.001",
+                            "rgba": "1 0 0 0",
+                            "pos": "0 0 0",
+                        },
+                    )
+                )
+            debug_site = next(
+                (site for site in base_body.findall("site") if site.get("name") == "base_link_origin"), None
+            )
+            if debug_site is not None:
+                debug_site.set("pos", "-0.0439 0 -0.068")
+            sensor_elem = root.find("sensor")
+            if sensor_elem is not None:
+                for elem in sensor_elem:
+                    if elem.get("objname") == "base_link_origin":
+                        elem.set("objname", "base_link_sensor_origin")
+                    if elem.get("site") == "base_link_origin":
+                        elem.set("site", "base_link_sensor_origin")
+
         rotor_indices = sorted(
             {int(match.group(1)) for name in body_elem if (match := re.fullmatch(r"rotor_(\d+)", name))}
         )
@@ -448,6 +490,10 @@ def postprocess_xml(
         for body in root.iter("body"):
             body_name = body.get("name")
             if body_name is None or not re.fullmatch(r"rotor_(\d+)", body_name):
+                continue
+            site_pose_overrides = PX4_PHYSICS_SITE_LOCAL_POSES.get(config.target, {})
+            if body_name in site_pose_overrides:
+                rotor_site_pos_local[body_name] = site_pose_overrides[body_name].copy()
                 continue
             mesh_geoms = [geom for geom in body.findall("geom") if geom.get("mesh")]
             if not mesh_geoms:
@@ -537,20 +583,9 @@ def postprocess_xml(
             vis_name = f"rotor_{rotor_id}_vis"
             existing = next((body for body in worldbody.findall("body") if body.get("name") == vis_name), None)
             rotor_name = f"rotor_{rotor_id}"
-            center_local = rotor_visual_center_local.get(rotor_name, [0.0, 0.0, 0.0])
-            rotor_world_pose = compose_visual_center_world(rotor_name, center_local)
+            rotor_world_pose = compose_body_world_pose(rotor_name)
             centered_geoms: list[ET.Element] = []
             for geom in rotor_visual_geom_map[rotor_id]:
-                geom_pos = parse_float_list(geom.get("pos"), [0.0, 0.0, 0.0])
-                centered_pos = [
-                    geom_pos[0] - center_local[0],
-                    geom_pos[1] - center_local[1],
-                    geom_pos[2] - center_local[2],
-                ]
-                if all(abs(value) <= 1e-12 for value in centered_pos):
-                    geom.attrib.pop("pos", None)
-                else:
-                    geom.set("pos", fmt_floats(centered_pos))
                 centered_geoms.append(geom)
             if existing is None:
                 attrs = {"name": vis_name, "mocap": "true"}
@@ -585,7 +620,13 @@ def postprocess_xml(
                 body.remove(joint)
             for inertial in list(body.findall("inertial")):
                 body.remove(inertial)
-            if config.target not in {"x500", "iris", "typhoon_h480"}:
+            if config.target in PX4_TARGETS:
+                # Keep PX4 rotor bodies as zero-mass semantic mounts that only carry
+                # thrust sites; the rendered propellers live on the separate mocap
+                # rotor_<n>_vis bodies created above.
+                for geom in list(body.findall("geom")):
+                    body.remove(geom)
+            elif config.target not in {"x500", "iris", "typhoon_h480"}:
                 for geom in [geom for geom in list(body.findall("geom")) if geom.get("mesh")]:
                     body.remove(geom)
 

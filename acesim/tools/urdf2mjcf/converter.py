@@ -3,17 +3,30 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from .compiler import compile_urdf_to_xml, find_mujoco_compile_binary
-from .config import ConverterConfig, ConverterPaths
-from .mesh_ops import clean_artifacts, process_urdf_collisions
+from acesim.tools.sdf2urdf import (
+    cleanup_manual_meshes_from_sdf,
+    generate_manual_meshes_from_sdf,
+    sync_manual_urdf_from_sdf,
+)
+from acesim.tools.sdf2urdf.asset_context import AssetPaths as SDFAssetPaths
+from acesim.tools.sdf2urdf.asset_context import AssetToolchainConfig as SDFAssetToolchainConfig
+
+from .asset_context import AssetPaths, AssetToolchainConfig
+from .mesh_processing import clean_artifacts, process_urdf_collisions
 from .mjcf_ops import euler_to_quat, fmt_floats, postprocess_xml
-from .px4_multirotor import cleanup_unused_meshes, generate_runtime_meshes
+from .mujoco_compiler import compile_urdf_to_xml, find_mujoco_compile_binary
+from .runtime_handler_registry import runtime_handler_for_target
 from .urdf_ops import calculate_min_z, parse_q0, preprocess_urdf
-from .xml_utils import add_collision_exclusions, indent_xml, inject_xml, sort_attributes
+from .xml_ops import add_collision_exclusions, indent_xml, inject_xml, sort_attributes
 
 
 class URDF2MJCFConverter:
-    """Thin compatibility wrapper around the split URDF-to-MJCF pipeline."""
+    """Compile an existing URDF asset into runtime-ready MuJoCo MJCF.
+
+    This stage intentionally consumes URDF as input. Any SDF truth sync happens
+    before the compiler runs and is orchestrated at the workflow layer here,
+    rather than inside lower-level MJCF helpers.
+    """
 
     def __init__(
         self,
@@ -24,7 +37,7 @@ class URDF2MJCFConverter:
         q0: str = "",
         mujoco_bin: str | None = None,
     ):
-        self.config = ConverterConfig(
+        self.config = AssetToolchainConfig(
             target=target,
             floating=floating,
             decompose=decompose,
@@ -32,7 +45,7 @@ class URDF2MJCFConverter:
             q0=q0,
             mujoco_bin=mujoco_bin,
         )
-        self.paths = ConverterPaths.for_target(target)
+        self.paths = AssetPaths.for_target(target)
         self.target = target
         self.floating = floating
         self.decompose = decompose
@@ -44,6 +57,7 @@ class URDF2MJCFConverter:
         self.mesh_dir = self.paths.mesh_dir
         self.xml_path = self.paths.xml_path
         self.initial_q = parse_q0(q0)
+        self.family_handler = runtime_handler_for_target(target)
 
     @staticmethod
     def indent_xml(elem: ET.Element, level: int = 0) -> None:
@@ -95,6 +109,24 @@ class URDF2MJCFConverter:
     def _find_mujoco_binary(self) -> str:
         return str(find_mujoco_compile_binary(self.config))
 
+    def _sdf_stage_config(self) -> SDFAssetToolchainConfig:
+        return SDFAssetToolchainConfig(
+            target=self.config.target,
+            floating=self.config.floating,
+            decompose=self.config.decompose,
+            safety_margin=self.config.safety_margin,
+            q0=self.config.q0,
+            mujoco_bin=self.config.mujoco_bin,
+        )
+
+    def _sdf_stage_paths(self) -> SDFAssetPaths:
+        return SDFAssetPaths(
+            base_dir=self.paths.base_dir,
+            urdf_path=self.paths.urdf_path,
+            mesh_dir=self.paths.mesh_dir,
+            xml_path=self.paths.xml_path,
+        )
+
     def _confirm_overwrite(self) -> None:
         if not self.xml_path.exists():
             return
@@ -111,9 +143,15 @@ class URDF2MJCFConverter:
             raise FileNotFoundError(f"URDF not found at {self.urdf_path}")
 
         self._confirm_overwrite()
+        sdf_stage_config = self._sdf_stage_config()
+        sdf_stage_paths = self._sdf_stage_paths()
 
         if self.mesh_dir.exists():
-            generate_runtime_meshes(self.config, self.paths)
+            # The SDF stage materializes source-driven meshes first, then the
+            # runtime handler prepares any MJCF-only meshes for the target family.
+            generate_manual_meshes_from_sdf(sdf_stage_config, sdf_stage_paths)
+            sync_manual_urdf_from_sdf(sdf_stage_config, sdf_stage_paths)
+            self.family_handler.prepare_runtime_assets(self.config, self.paths)
 
         processing_urdf_path = self.urdf_path
         if self.decompose:
@@ -142,7 +180,8 @@ class URDF2MJCFConverter:
             initial_q=self.initial_q,
             height_offset=height_offset,
         )
-        cleanup_unused_meshes(self.config, self.paths)
+        self.family_handler.cleanup_runtime_assets(self.config, self.paths)
+        cleanup_manual_meshes_from_sdf(sdf_stage_config, sdf_stage_paths)
         print("\nCompilation and post-processing complete.")
 
 

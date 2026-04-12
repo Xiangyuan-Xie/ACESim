@@ -1,10 +1,13 @@
+"""Multirotor-specific runtime asset preparation and MJCF rewriting."""
+
 import copy
 import math
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from typing import TypeAlias, TypedDict
 
-from .config import ConverterConfig, ConverterPaths
-from .mesh_ops import export_translated_mesh, mesh_bounds_center
+from ..asset_context import AssetPaths, AssetToolchainConfig
+from ..mesh_processing import export_translated_mesh, mesh_bounds_center
 
 Vec3: TypeAlias = list[float]
 Vec4: TypeAlias = list[float]
@@ -125,7 +128,7 @@ TYPHOON_LEG_SPECS: dict[str, LegSpec] = {
 }
 
 
-def generate_runtime_meshes(config: ConverterConfig, paths: ConverterPaths) -> None:
+def generate_runtime_meshes(config: AssetToolchainConfig, paths: AssetPaths) -> None:
     if config.target == "x500":
         export_translated_mesh(
             paths.mesh_dir,
@@ -149,7 +152,7 @@ def generate_runtime_meshes(config: ConverterConfig, paths: ConverterPaths) -> N
             )
 
 
-def cleanup_unused_meshes(config: ConverterConfig, paths: ConverterPaths) -> None:
+def cleanup_unused_meshes(config: AssetToolchainConfig, paths: AssetPaths) -> None:
     if not paths.mesh_dir.exists():
         return
 
@@ -314,8 +317,8 @@ def _ensure_rotor_visual_body(
     )
 
 
-def rebuild_px4_multirotor(
-    root: ET.Element, worldbody: ET.Element, config: ConverterConfig, paths: ConverterPaths
+def rebuild_multirotor_runtime_model(
+    root: ET.Element, worldbody: ET.Element, config: AssetToolchainConfig, paths: AssetPaths
 ) -> None:
     if config.target not in {"x500", "iris", "typhoon_h480"}:
         return
@@ -663,3 +666,21 @@ def rebuild_px4_multirotor(
             conaffinity=1,
         )
         _ensure_rotor_visual_body(worldbody, idx, f"typhoon_rotor_vis_{idx}", quat=spec["quat"], rgba=spec["rgba"])
+
+
+@dataclass(frozen=True)
+class MultirotorRuntimeModelHandler:
+    """Runtime handler for multirotor assets that need mesh/material rewrites."""
+
+    family: str = "multirotor"
+
+    def prepare_runtime_assets(self, config: AssetToolchainConfig, paths: AssetPaths) -> None:
+        generate_runtime_meshes(config, paths)
+
+    def cleanup_runtime_assets(self, config: AssetToolchainConfig, paths: AssetPaths) -> None:
+        cleanup_unused_meshes(config, paths)
+
+    def rewrite_runtime_model(
+        self, root: ET.Element, worldbody: ET.Element, config: AssetToolchainConfig, paths: AssetPaths
+    ) -> None:
+        rebuild_multirotor_runtime_model(root, worldbody, config, paths)

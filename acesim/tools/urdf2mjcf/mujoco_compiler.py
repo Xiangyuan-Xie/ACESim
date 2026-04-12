@@ -3,10 +3,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .config import ConverterConfig
+from .asset_context import AssetToolchainConfig
 
 
-def find_mujoco_compile_binary(config: ConverterConfig) -> Path:
+def find_mujoco_compile_binary(config: AssetToolchainConfig) -> Path:
     if config.mujoco_bin:
         binary = Path(config.mujoco_bin)
         if binary.exists():

@@ -5,10 +5,17 @@ from pathlib import Path
 
 import trimesh
 
-from .config import ConverterPaths
+from .asset_context import AssetPaths
 
 
-def clean_artifacts(paths: ConverterPaths) -> None:
+def _load_trimesh_geometry(mesh_path: Path) -> trimesh.Trimesh:
+    scene_or_mesh = trimesh.load(mesh_path, force="scene")
+    if isinstance(scene_or_mesh, trimesh.Scene):
+        return scene_or_mesh.to_geometry()
+    return scene_or_mesh
+
+
+def clean_artifacts(paths: AssetPaths) -> None:
     if paths.xml_path.exists():
         paths.xml_path.unlink()
 
@@ -19,11 +26,11 @@ def clean_artifacts(paths: ConverterPaths) -> None:
         mesh_path.unlink()
 
 
-def load_trimesh_geometry(mesh_path: Path) -> trimesh.Trimesh:
-    scene_or_mesh = trimesh.load(mesh_path, force="scene")
-    if isinstance(scene_or_mesh, trimesh.Scene):
-        return scene_or_mesh.to_geometry()
-    return scene_or_mesh
+def export_mesh_copy(src: Path, dst: Path) -> None:
+    if not src.exists():
+        raise FileNotFoundError(f"Required source mesh not found: {src}")
+    mesh = _load_trimesh_geometry(src).copy()
+    mesh.export(dst)
 
 
 def export_translated_mesh(
@@ -38,7 +45,7 @@ def export_translated_mesh(
     dst = mesh_dir / dst_name
     if not src.exists():
         raise FileNotFoundError(f"Required source mesh not found: {src}")
-    mesh = load_trimesh_geometry(src).copy()
+    mesh = _load_trimesh_geometry(src).copy()
     mesh.apply_translation([t * source_units_to_output for t in translation])
     mesh.export(dst)
 
@@ -48,14 +55,23 @@ def export_centered_mesh(mesh_dir: Path, src_name: str, dst_name: str) -> None:
     dst = mesh_dir / dst_name
     if not src.exists():
         raise FileNotFoundError(f"Required source mesh not found: {src}")
-    mesh = load_trimesh_geometry(src).copy()
+    mesh = _load_trimesh_geometry(src).copy()
+    centroid = mesh.centroid.tolist()
+    mesh.apply_translation([-centroid[0], -centroid[1], -centroid[2]])
+    mesh.export(dst)
+
+
+def export_centered_mesh_from_path(src: Path, dst: Path) -> None:
+    if not src.exists():
+        raise FileNotFoundError(f"Required source mesh not found: {src}")
+    mesh = _load_trimesh_geometry(src).copy()
     centroid = mesh.centroid.tolist()
     mesh.apply_translation([-centroid[0], -centroid[1], -centroid[2]])
     mesh.export(dst)
 
 
 def mesh_bounds_center(mesh_dir: Path, mesh_name: str, *, mesh_scale: list[float] | None = None) -> list[float]:
-    mesh = load_trimesh_geometry(mesh_dir / mesh_name)
+    mesh = _load_trimesh_geometry(mesh_dir / mesh_name)
     center = ((mesh.bounds[0] + mesh.bounds[1]) / 2.0).tolist()
     if mesh_scale is not None:
         center = [center[i] * mesh_scale[i] for i in range(3)]
