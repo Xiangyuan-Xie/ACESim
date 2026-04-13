@@ -9,7 +9,7 @@ import numpy as np
 import trimesh
 from scipy.spatial.transform import Rotation
 
-from acesim.tools.sdf2urdf import sdf_path_for_target
+from acesim.tools.sdf2urdf.providers import PX4_PROVIDER
 from acesim.tools.sdf2urdf.providers.px4 import ADVANCED_PLANE_SCALE
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -84,7 +84,7 @@ def _projected_bbox(points: np.ndarray, *, dims: tuple[int, int]) -> np.ndarray:
 
 
 def _source_sdf_path(name: str) -> Path:
-    return sdf_path_for_target("px4", name)
+    return PX4_PROVIDER.sdf_path_for_target(name)
 
 
 def _source_visual_pose(name: str, link_name: str) -> tuple[str, str, str]:

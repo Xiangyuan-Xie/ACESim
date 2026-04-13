@@ -21,7 +21,7 @@ class VehicleVisualStreamParams:
 
     enabled: bool = False
     rate_hz: float = 120.0
-    zmq_endpoint: str = "tcp://0.0.0.0:5602"
+    zmq_endpoint: str = "tcp://0.0.0.0:5601"
 
     def __post_init__(self) -> None:
         if self.rate_hz <= 0.0:
@@ -35,7 +35,7 @@ class VehicleVisualStreamParams:
         return cls(
             enabled=bool(config.get("enabled", False)),
             rate_hz=float(config.get("rate_hz", 120.0)),
-            zmq_endpoint=str(config.get("zmq_endpoint", "tcp://0.0.0.0:5602")),
+            zmq_endpoint=str(config.get("zmq_endpoint", "tcp://0.0.0.0:5601")),
         )
 
 

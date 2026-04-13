@@ -225,12 +225,6 @@ def _mesh_world_bounds(model: mujoco.MjModel, data: mujoco.MjData) -> tuple[np.n
     return bounds_min, bounds_max
 
 
-def _resolve_settle_steps(preset: PreviewPreset, settle_steps_override: int | None) -> int:
-    if settle_steps_override is None:
-        return preset.settle_steps
-    return max(settle_steps_override, 0)
-
-
 def _snap_model_to_ground(model: mujoco.MjModel, data: mujoco.MjData) -> tuple[np.ndarray, np.ndarray]:
     bounds_min, bounds_max = _mesh_world_bounds(model, data)
     if abs(float(bounds_min[2])) <= 1e-9:
@@ -257,7 +251,7 @@ def _prepare_preview_state(
 ) -> tuple[mujoco.MjModel, mujoco.MjData, np.ndarray, np.ndarray]:
     preset = PREVIEW_PRESETS[asset_name]
     model, data = _load_model(asset_name)
-    settle_steps = _resolve_settle_steps(preset, settle_steps_override)
+    settle_steps = preset.settle_steps if settle_steps_override is None else max(settle_steps_override, 0)
 
     if preset.pose_mode not in {HOME_KEYFRAME, DYNAMIC_SETTLE}:
         raise ValueError(f"Unsupported preview pose mode: {preset.pose_mode}")

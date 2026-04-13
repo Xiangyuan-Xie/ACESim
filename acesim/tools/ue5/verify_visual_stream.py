@@ -13,7 +13,7 @@ from acesim.utils.vehicle_visual_state_publisher import VehicleVisualStatePublis
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Subscribe to ACESim's UE visual stream.")
-    parser.add_argument("--endpoint", default="tcp://127.0.0.1:5602")
+    parser.add_argument("--endpoint", default="tcp://127.0.0.1:5601")
     parser.add_argument("--samples", type=int, default=5)
     args = parser.parse_args()
 

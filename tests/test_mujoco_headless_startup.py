@@ -60,6 +60,19 @@ class _FakeArmStatePublisher:
         return None
 
 
+class _FakeArmCommandPublisher:
+    publish_calls: list[tuple[int, object]] = []
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    def publish(self, timestamp_us: int, joint_positions: object) -> None:
+        self.publish_calls.append((timestamp_us, joint_positions))
+
+    def close(self) -> None:
+        return None
+
+
 class _FakeRobotAgent:
     def act(self) -> tuple[list[float], None, None]:
         return ([0.0] * 7, None, None)
@@ -83,6 +96,7 @@ def _config_path(name: str) -> Path:
 
 
 @patch("acesim.env.mujoco.mc_arm_env.make_robot", lambda: _FakeRobotAgent())
+@patch("acesim.env.mujoco.mc_arm_env.ArmCommandPublisher", _FakeArmCommandPublisher)
 @patch("acesim.env.mujoco.mc_arm_env.ArmStatePublisher", _FakeArmStatePublisher)
 @patch("acesim.env.mujoco.px4_mj_env.VehicleVisualStatePublisher", _FakeVisualPublisher)
 @patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _FakePX4Transport)
@@ -124,9 +138,12 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
         return config_path
 
     def test_default_config_starts_headless(self) -> None:
+        _FakeArmCommandPublisher.publish_calls.clear()
         expected_loader = ConfigLoader(_config_path("default"))
         env = self._instantiate_and_step(_config_path("default"))
         try:
+            for _ in range(8):
+                env.step()
             self.assertEqual(env._config_loader.get_asset_name(), expected_loader.get_asset_name())
             self.assertEqual(env._config_loader.get_env_type(), expected_loader.get_env_type())
             self.assertGreaterEqual(env._step_count, 1)

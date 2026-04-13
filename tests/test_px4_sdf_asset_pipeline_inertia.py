@@ -4,7 +4,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from acesim.tools.sdf2urdf import load_sdf_truth
+from acesim.tools.sdf2urdf.providers import PX4_PROVIDER
 
 
 def _mujoco_asset_root(name: str) -> Path:
@@ -12,7 +12,7 @@ def _mujoco_asset_root(name: str) -> Path:
 
 
 def _source_link_inertial_truth(name: str, link_name: str) -> dict[str, float]:
-    truth = load_sdf_truth("px4", name).inertials.get(link_name)
+    truth = PX4_PROVIDER.load_truth(name).inertials.get(link_name)
     if truth is None:
         raise ValueError(f"Missing source inertial for {name}:{link_name}")
     return {

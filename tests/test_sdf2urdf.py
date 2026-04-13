@@ -4,7 +4,13 @@ import subprocess
 import sys
 import unittest
 
-from acesim.tools.sdf2urdf import AssetPaths, AssetToolchainConfig, SDFModelTruth, load_sdf_truth, sdf_path_for_target
+from acesim.tools.sdf2urdf import (
+    AssetPaths,
+    AssetToolchainConfig,
+    SDFModelTruth,
+    generate_manual_meshes_from_sdf,
+)
+from acesim.tools.sdf2urdf.providers import PX4_PROVIDER
 
 
 class SDF2URDFTests(unittest.TestCase):
@@ -36,7 +42,7 @@ class SDF2URDFTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "")
 
     def test_px4_provider_loads_truth_into_generic_model(self) -> None:
-        truth = load_sdf_truth("px4", "advanced_plane")
+        truth = PX4_PROVIDER.load_truth("advanced_plane")
 
         self.assertIsInstance(truth, SDFModelTruth)
         self.assertIn("base_link", truth.visuals)
@@ -46,13 +52,17 @@ class SDF2URDFTests(unittest.TestCase):
         self.assertGreater(truth.inertials["base_link"].mass, 0.0)
 
     def test_px4_provider_resolves_target_path(self) -> None:
-        path = sdf_path_for_target("px4", "advanced_plane")
+        path = PX4_PROVIDER.sdf_path_for_target("advanced_plane")
         self.assertTrue(path.name.endswith(".sdf.jinja"))
         self.assertIn("plane", path.as_posix())
 
     def test_unknown_source_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported SDF source"):
-            load_sdf_truth("missing", "advanced_plane")
+            generate_manual_meshes_from_sdf(
+                AssetToolchainConfig(target="advanced_plane"),
+                AssetPaths.for_target("advanced_plane"),
+                source="missing",
+            )
 
 
 if __name__ == "__main__":

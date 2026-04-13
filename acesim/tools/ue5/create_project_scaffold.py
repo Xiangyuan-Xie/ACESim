@@ -327,7 +327,7 @@ public:
 
 protected:
     UPROPERTY(EditAnywhere, Category="ACESim")
-    FString Endpoint = TEXT("tcp://127.0.0.1:5602");
+    FString Endpoint = TEXT("tcp://127.0.0.1:5601");
 
     UPROPERTY(EditAnywhere, Category="ACESim")
     bool bAutoConnectOnBeginPlay = true;

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 """Stage 1 of the asset pipeline: synchronize ACESim URDF assets from SDF."""
 
-from pathlib import Path
-
 from acesim.tools.sdf2urdf.contracts import (
     SDFInertialTruth,
     SDFJointTruth,
@@ -29,14 +27,6 @@ def _provider_for_source(source: str) -> SDFSourceProvider:
 
 def available_sources() -> tuple[str, ...]:
     return tuple(sorted(_PROVIDERS))
-
-
-def sdf_path_for_target(source: str, target: str) -> Path:
-    return _provider_for_source(source).sdf_path_for_target(target)
-
-
-def load_sdf_truth(source: str, target: str) -> SDFModelTruth:
-    return _provider_for_source(source).load_truth(target)
 
 
 def generate_manual_meshes_from_sdf(config: AssetToolchainConfig, paths: AssetPaths, *, source: str = "px4") -> None:
@@ -67,7 +57,5 @@ __all__ = [
     "available_sources",
     "cleanup_manual_meshes_from_sdf",
     "generate_manual_meshes_from_sdf",
-    "load_sdf_truth",
-    "sdf_path_for_target",
     "sync_manual_urdf_from_sdf",
 ]

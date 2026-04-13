@@ -15,7 +15,7 @@
    - 项目内自带 `ACESimBridge` 插件
    - 插件包含 `AACESimVehicleActor` 与 `UACESimVehicleSyncComponent`
 4. `verify_visual_stream.py`
-   - 直接订阅 `tcp://127.0.0.1:5602`
+   - 直接订阅 `tcp://127.0.0.1:5601`
    - 校验 ACESim 发布的视觉状态 payload
 
 ## 默认目录
@@ -41,5 +41,5 @@ UE5 编辑器启动后：
 - 打开 `/tmp/ACESim-unreal/projects/ACESimUE/ACESimUE.uproject`
 - 在关卡里放一个 `ACESimVehicleActor`
 - 给它添加 `ACESimVehicleSyncComponent`
-- 保持 endpoint 为 `tcp://127.0.0.1:5602`
+- 保持 endpoint 为 `tcp://127.0.0.1:5601`
 - Play 后即可从 ACESim 订阅状态并驱动 actor

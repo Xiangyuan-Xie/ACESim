@@ -20,7 +20,7 @@ class ArmStatePublisher:
 
     def __init__(
         self,
-        zmq_endpoint: str = "tcp://0.0.0.0:5601",
+        zmq_endpoint: str = "tcp://0.0.0.0:5603",
         enable_zmq: bool = True,
     ) -> None:
         self._endpoint: str = zmq_endpoint

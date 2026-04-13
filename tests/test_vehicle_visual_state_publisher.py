@@ -16,7 +16,7 @@ class VehicleVisualStatePublisherTests(unittest.TestCase):
         params = VehicleVisualStreamParams.from_asset_params({})
         self.assertFalse(params.enabled)
         self.assertEqual(params.rate_hz, 120.0)
-        self.assertEqual(params.zmq_endpoint, "tcp://0.0.0.0:5602")
+        self.assertEqual(params.zmq_endpoint, "tcp://0.0.0.0:5601")
 
     def test_unpack_round_trip_matches_original_values(self) -> None:
         state = VehicleVisualState(

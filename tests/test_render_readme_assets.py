@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from acesim.tools import render_readme_assets
 
@@ -40,9 +41,19 @@ class RenderReadmeAssetsTests(unittest.TestCase):
                     self.assertEqual(preset.settle_steps, settle_steps)
 
     def test_settle_override_uses_cli_value_when_provided(self) -> None:
-        preset = render_readme_assets.PREVIEW_PRESETS["x500_arm2x"]
-        self.assertEqual(render_readme_assets._resolve_settle_steps(preset, None), 0)
-        self.assertEqual(render_readme_assets._resolve_settle_steps(preset, 12), 12)
+        with (
+            patch.object(render_readme_assets, "_load_model", return_value=("model", "data")),
+            patch.object(render_readme_assets, "_mesh_world_bounds", return_value=("min", "max")),
+            patch.object(render_readme_assets, "_snap_model_to_ground", return_value=("min", "max")),
+            patch.object(render_readme_assets, "_initialize_visual_mocaps"),
+            patch.object(render_readme_assets.mujoco, "mj_step") as mj_step,
+        ):
+            model, data, bounds_min, bounds_max = render_readme_assets._prepare_preview_state(
+                "x500_arm2x", settle_steps_override=12
+            )
+
+        self.assertEqual((model, data, bounds_min, bounds_max), ("model", "data", "min", "max"))
+        self.assertEqual(mj_step.call_count, 12)
 
     def test_home_pose_ground_snap_places_vehicle_on_ground(self) -> None:
         model, data, bounds_min, _ = render_readme_assets._prepare_preview_state("x500_arm2x")
