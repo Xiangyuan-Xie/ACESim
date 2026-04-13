@@ -9,6 +9,7 @@ from acetele.core.make_robot import make_robot
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.mc_env import MCEnv
+from acesim.utils.arm_command_publisher import ArmCommandPublisher
 from acesim.utils.arm_servo_scheduler import ArmControlSample, ArmServoScheduler, ArmStateSample
 from acesim.utils.arm_state_publisher import ArmStatePublisher
 
@@ -49,6 +50,7 @@ class MCArmEnv(MCEnv):
         self._arm_joint_ids = [
             mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_JOINT, name) for name in self._arm_joint_names
         ]
+        self._arm_command_publisher = ArmCommandPublisher()
         self._arm_state_publisher = ArmStatePublisher()
         self._arm_servo_scheduler = ArmServoScheduler(
             clock=self._sim_clock,
@@ -57,6 +59,7 @@ class MCArmEnv(MCEnv):
             state_publish_rate_hz=self._arm_params.arm_state_publish_rate_hz,
             read_control_target=self._read_arm_control_target,
             apply_control=self._apply_arm_control,
+            publish_control=self._publish_arm_command,
             read_state=self._read_arm_joint_state,
         )
         self._reset_to_home()
@@ -143,6 +146,14 @@ class MCArmEnv(MCEnv):
             if act_id >= 0 and i < len(control_sample.joint_positions):
                 self._mj_data.ctrl[act_id] = control_sample.joint_positions[i]
 
+    def _publish_arm_command(self, timestamp_us: int, control_sample: ArmControlSample) -> None:
+        """Publish the exported arm-command subset over ZeroMQ."""
+
+        self._arm_command_publisher.publish(
+            timestamp_us,
+            control_sample.joint_positions[: len(self._arm_ros_joint_names)],
+        )
+
     def _read_arm_joint_state(self) -> ArmStateSample:
         """Return the current MuJoCo arm state for the five exported joints."""
 
@@ -173,5 +184,6 @@ class MCArmEnv(MCEnv):
         """Release the arm agent before delegating backend cleanup."""
 
         self._robot.close()
+        self._arm_command_publisher.close()
         self._arm_state_publisher.close()
         super().close()
