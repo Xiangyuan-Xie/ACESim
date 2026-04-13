@@ -8,5 +8,5 @@
 	branch = master
 [submodule "acesim/deploy/aircraft/px4_msgs"]
 	path = acesim/deploy/aircraft/px4_msgs
-	url = https://github.com/PX4/px4_msgs
-	branch = release/1.17
+	url = https://github.com/Xiangyuan-Xie/px4_msgs
+	branch = ACEPliot
