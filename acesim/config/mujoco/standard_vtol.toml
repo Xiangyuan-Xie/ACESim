@@ -12,7 +12,7 @@ gps_rate_hz = 30.0
 [params.visual_stream]
 enabled = true
 rate_hz = 120.0
-zmq_endpoint = "tcp://0.0.0.0:5602"
+zmq_endpoint = "tcp://0.0.0.0:5601"
 
 [params.fw]
 model = "standard_vtol"
