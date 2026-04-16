@@ -84,26 +84,8 @@ class BridgeRuntimeTests(unittest.TestCase):
         transport.close()
         self.assertTrue(socket.closed)
 
-    def test_bridge_runtime_rejects_non_monotonic_timestamp(self) -> None:
-        bridge_config = self.config_loader.BridgeConfig(
-            name="arm_command_px4",
-            enabled=True,
-            poll_period_sec=0.001,
-            transport=self.config_loader.TransportConfig(type="zmq_sub", endpoint="tcp://127.0.0.1:5602"),
-            topic="/fmu/in/arm_joint_command",
-        )
-        node = _FakeNode()
-        plugin = self.plugin_registry.PLUGIN_REGISTRY["arm_command_px4"]
-        runtime = self.runtime.BridgeRuntime(
-            node=node,
-            bridge_config=bridge_config,
-            plugin=plugin,
-            transport=self.runtime.ZmqSubTransport(bridge_config.transport.endpoint),
-        )
-
-        runtime.process_payload(struct.pack("<Q5d", 2_000_000, 1.0, 2.0, 3.0, 4.0, 5.0))
-        with self.assertRaisesRegex(ValueError, "Non-monotonic timestamp_us"):
-            runtime.process_payload(struct.pack("<Q5d", 1_000_000, 1.0, 2.0, 3.0, 4.0, 5.0))
+    def test_bridge_runtime_registry_no_longer_contains_arm_command_px4(self) -> None:
+        self.assertNotIn("arm_command_px4", self.plugin_registry.PLUGIN_REGISTRY)
 
     def test_bridge_host_builds_runtime_and_publishes(self) -> None:
         node = _FakeNode()

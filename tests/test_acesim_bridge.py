@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import math
 import struct
 import sys
 import tempfile
@@ -30,6 +29,7 @@ def _load_acesim_bridge_module() -> ModuleType:
         "sensor_msgs.msg",
         "px4_msgs",
         "px4_msgs.msg",
+        "acesim_ros2",
     ]:
         sys.modules.pop(name, None)
 
@@ -66,11 +66,6 @@ def _load_acesim_bridge_module() -> ModuleType:
             self.position: list[float] = []
             self.velocity: list[float] = []
             self.effort: list[float] = []
-
-    class ArmJointCommand:
-        def __init__(self) -> None:
-            self.timestamp = 0
-            self.arm_command: list[float] = []
 
     class ArmJointState:
         def __init__(self) -> None:
@@ -218,7 +213,6 @@ def _load_acesim_bridge_module() -> ModuleType:
     setattr(rosgraph_msgs_module, "msg", rosgraph_msgs_msg_module)
     setattr(sensor_msgs_msg_module, "JointState", JointState)
     setattr(sensor_msgs_module, "msg", sensor_msgs_msg_module)
-    setattr(px4_msgs_msg_module, "ArmJointCommand", ArmJointCommand)
     setattr(px4_msgs_msg_module, "ArmJointState", ArmJointState)
     setattr(px4_msgs_module, "msg", px4_msgs_msg_module)
 
@@ -234,6 +228,13 @@ def _load_acesim_bridge_module() -> ModuleType:
     sys.modules["sensor_msgs.msg"] = sensor_msgs_msg_module
     sys.modules["px4_msgs"] = px4_msgs_module
     sys.modules["px4_msgs.msg"] = px4_msgs_msg_module
+    package_module = types.ModuleType("acesim_ros2")
+    setattr(
+        package_module,
+        "__path__",
+        [str(Path(__file__).resolve().parents[1] / "acesim" / "deploy" / "aircraft" / "acesim_ros2" / "acesim_ros2")],
+    )
+    sys.modules["acesim_ros2"] = package_module
 
     module_path = (
         Path(__file__).resolve().parents[1]
@@ -397,22 +398,22 @@ class AcesimBridgeTests(unittest.TestCase):
 
         self.assertEqual([runtime.name for runtime in node._bridge_runtimes], ["simulation_clock"])
 
-    def test_bridge_node_applies_arm_command_defaults(self) -> None:
+    def test_bridge_node_loads_arm_state_bridge(self) -> None:
         node = self._make_bridge_node("""
             bridges:
-              arm_command_ros:
+              arm_state:
                 enabled: true
                 transport:
                   type: zmq_sub
-                  endpoint: tcp://127.0.0.1:5602
-                topic: /arm/command
+                  endpoint: tcp://127.0.0.1:5603
+                topic: /fmu/in/arm_joint_state
             """)
 
         bridge = node._bridge_runtimes[0]._bridge
-        self.assertEqual(bridge.name, "arm_command_ros")
+        self.assertEqual(bridge.name, "arm_state")
         self.assertEqual(bridge.poll_period_sec, 0.001)
-        self.assertEqual(bridge.joint_names, ["joint1", "joint2", "joint3", "joint4", "joint5"])
-        self.assertEqual(bridge.topic, "/arm/command")
+        self.assertIsNone(bridge.joint_names)
+        self.assertEqual(bridge.topic, "/fmu/in/arm_joint_state")
 
     def test_bridge_node_loads_all_enabled_bridges_from_config(self) -> None:
         node = self._make_bridge_node("""
@@ -431,27 +432,20 @@ class AcesimBridgeTests(unittest.TestCase):
                   type: zmq_sub
                   endpoint: tcp://127.0.0.1:5601
                 topic: /ignored
-              arm_command_ros:
+              arm_state:
                 enabled: true
                 poll_period_sec: 0.005
                 transport:
                   type: zmq_sub
-                  endpoint: tcp://127.0.0.1:5602
-                topic: /arm/command
-              arm_command_px4:
-                enabled: true
-                poll_period_sec: 0.005
-                transport:
-                  type: zmq_sub
-                  endpoint: tcp://127.0.0.1:5602
-                topic: /fmu/in/arm_joint_command
+                  endpoint: tcp://127.0.0.1:5603
+                topic: /fmu/in/arm_joint_state
             """)
 
         self.assertEqual(
             [runtime.name for runtime in node._bridge_runtimes],
-            ["simulation_clock", "arm_command_ros", "arm_command_px4"],
+            ["simulation_clock", "arm_state"],
         )
-        self.assertEqual([timer.period for timer in node.timers], [0.001, 0.005, 0.005])
+        self.assertEqual([timer.period for timer in node.timers], [0.001, 0.005])
 
     def test_bridge_node_creates_timer_per_bridge(self) -> None:
         node = self._make_bridge_node("""
@@ -463,28 +457,21 @@ class AcesimBridgeTests(unittest.TestCase):
                   type: zmq_sub
                   endpoint: tcp://127.0.0.1:5600
                 topic: /acesim/clock
-              arm_command_ros:
+              arm_state:
                 enabled: true
                 poll_period_sec: 0.005
                 transport:
                   type: zmq_sub
-                  endpoint: tcp://127.0.0.1:5602
-                topic: /arm/command
-              arm_command_px4:
-                enabled: true
-                poll_period_sec: 0.005
-                transport:
-                  type: zmq_sub
-                  endpoint: tcp://127.0.0.1:5602
-                topic: /fmu/in/arm_joint_command
+                  endpoint: tcp://127.0.0.1:5603
+                topic: /fmu/in/arm_joint_state
             """)
 
         self.assertEqual(
             [runtime.name for runtime in node._bridge_runtimes],
-            ["simulation_clock", "arm_command_ros", "arm_command_px4"],
+            ["simulation_clock", "arm_state"],
         )
-        self.assertEqual([timer.period for timer in node.timers], [0.001, 0.005, 0.005])
-        self.assertEqual(len(node.publishers), 3)
+        self.assertEqual([timer.period for timer in node.timers], [0.001, 0.005])
+        self.assertEqual(len(node.publishers), 2)
 
     def test_bridge_node_init_transport_uses_fixed_socket_options(self) -> None:
         node = self._make_bridge_node("""
@@ -541,46 +528,6 @@ class AcesimBridgeTests(unittest.TestCase):
         message = publisher.messages[0]
         self.assertEqual(message.clock.sec, 2)
         self.assertEqual(message.clock.nanosec, 500_000_000)
-
-    def test_arm_command_ros_handler_publishes_joint_state_message(self) -> None:
-        node = self._make_bridge_node("""
-            bridges:
-              arm_command_ros:
-                enabled: true
-                transport:
-                  type: zmq_sub
-                  endpoint: tcp://127.0.0.1:5602
-                topic: /arm/command
-            """)
-        runtime = node._bridge_runtimes[0]
-
-        runtime.process_payload(struct.pack("<Q5d", 1_234_567, 1.0, math.nan, 3.0, 4.0, 5.0))
-
-        ros_publisher = next(publisher for publisher in node.publishers if publisher.topic == "/arm/command")
-        ros_message = ros_publisher.messages[0]
-        self.assertEqual(ros_message.header.stamp.sec, 1)
-        self.assertEqual(ros_message.header.stamp.nanosec, 234_567_000)
-        self.assertEqual(ros_message.position, [1.0, 0.0, 3.0, 4.0, 5.0])
-        self.assertEqual(len(node.publishers), 1)
-
-    def test_arm_command_px4_handler_publishes_px4_message(self) -> None:
-        node = self._make_bridge_node("""
-            bridges:
-              arm_command_px4:
-                enabled: true
-                transport:
-                  type: zmq_sub
-                  endpoint: tcp://127.0.0.1:5602
-                topic: /fmu/in/arm_joint_command
-            """)
-        runtime = node._bridge_runtimes[0]
-
-        runtime.process_payload(struct.pack("<Q5d", 1_234_567, 1.0, math.nan, 3.0, 4.0, 5.0))
-
-        publisher = next(publisher for publisher in node.publishers if publisher.topic == "/fmu/in/arm_joint_command")
-        message = publisher.messages[0]
-        self.assertEqual(message.timestamp, 1_234_567)
-        self.assertEqual(message.arm_command, [1.0, 0.0, 3.0, 4.0, 5.0])
 
     def test_arm_state_handler_publishes_px4_message(self) -> None:
         node = self._make_bridge_node("""
@@ -640,18 +587,58 @@ class AcesimBridgeTests(unittest.TestCase):
     def test_compiled_bridge_runtime_non_monotonic_timestamp_raises(self) -> None:
         node = self._make_bridge_node("""
             bridges:
-              arm_command_px4:
+              arm_state:
                 enabled: true
                 transport:
                   type: zmq_sub
-                  endpoint: tcp://127.0.0.1:5602
-                topic: /fmu/in/arm_joint_command
+                  endpoint: tcp://127.0.0.1:5603
+                topic: /fmu/in/arm_joint_state
             """)
         runtime = node._bridge_runtimes[0]
 
-        runtime.process_payload(struct.pack("<Q5d", 2_000_000, 1.0, 2.0, 3.0, 4.0, 5.0))
+        runtime.process_payload(
+            struct.pack(
+                "<Q15d",
+                2_000_000,
+                0.1,
+                0.2,
+                0.3,
+                0.4,
+                0.5,
+                1.1,
+                1.2,
+                1.3,
+                1.4,
+                1.5,
+                9.1,
+                9.2,
+                9.3,
+                9.4,
+                9.5,
+            )
+        )
         with self.assertRaisesRegex(ValueError, "Non-monotonic timestamp_us"):
-            runtime.process_payload(struct.pack("<Q5d", 1_000_000, 1.0, 2.0, 3.0, 4.0, 5.0))
+            runtime.process_payload(
+                struct.pack(
+                    "<Q15d",
+                    1_000_000,
+                    0.1,
+                    0.2,
+                    0.3,
+                    0.4,
+                    0.5,
+                    1.1,
+                    1.2,
+                    1.3,
+                    1.4,
+                    1.5,
+                    9.1,
+                    9.2,
+                    9.3,
+                    9.4,
+                    9.5,
+                )
+            )
 
     def test_main_cleans_up_on_keyboard_interrupt(self) -> None:
         calls: list[str] = []

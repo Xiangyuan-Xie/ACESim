@@ -23,6 +23,12 @@ def _load_launch_common_module() -> ModuleType:
         "launch.event_handlers",
         "launch_ros",
         "launch_ros.actions",
+        "rclpy",
+        "rclpy.qos",
+        "rosgraph_msgs",
+        "rosgraph_msgs.msg",
+        "px4_msgs",
+        "px4_msgs.msg",
     ]:
         sys.modules.pop(name, None)
 
@@ -33,6 +39,12 @@ def _load_launch_common_module() -> ModuleType:
     launch_ros_actions_module: Any = types.ModuleType("launch_ros.actions")
     ament_index_module: Any = types.ModuleType("ament_index_python")
     ament_index_packages_module: Any = types.ModuleType("ament_index_python.packages")
+    rclpy_module: Any = types.ModuleType("rclpy")
+    rclpy_qos_module: Any = types.ModuleType("rclpy.qos")
+    rosgraph_msgs_module: Any = types.ModuleType("rosgraph_msgs")
+    rosgraph_msgs_msg_module: Any = types.ModuleType("rosgraph_msgs.msg")
+    px4_msgs_module: Any = types.ModuleType("px4_msgs")
+    px4_msgs_msg_module: Any = types.ModuleType("px4_msgs.msg")
 
     class ExecuteProcess:
         def __init__(self, *, cmd=None, cwd=None, additional_env=None, output=None, **kwargs):
@@ -70,6 +82,31 @@ def _load_launch_common_module() -> ModuleType:
             self.output = output
             self.kwargs = kwargs
 
+    class QoSProfile:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class _Enum:
+        KEEP_LAST = "keep_last"
+        BEST_EFFORT = "best_effort"
+        VOLATILE = "volatile"
+        RELIABLE = "reliable"
+
+    class _FakeStamp:
+        def __init__(self) -> None:
+            self.sec = 0
+            self.nanosec = 0
+
+    class Clock:
+        def __init__(self) -> None:
+            self.clock = _FakeStamp()
+
+    class ArmJointState:
+        def __init__(self) -> None:
+            self.timestamp = 0
+            self.arm_position: list[float] = []
+            self.arm_velocity: list[float] = []
+
     def get_package_share_directory(_: str) -> str:
         return "/tmp/install/share/acesim_ros2"
 
@@ -80,6 +117,14 @@ def _load_launch_common_module() -> ModuleType:
     launch_event_handlers_module.OnProcessStart = OnProcessStart
     launch_ros_actions_module.Node = Node
     ament_index_packages_module.get_package_share_directory = get_package_share_directory
+    rclpy_qos_module.QoSProfile = QoSProfile
+    rclpy_qos_module.HistoryPolicy = _Enum
+    rclpy_qos_module.ReliabilityPolicy = _Enum
+    rclpy_qos_module.DurabilityPolicy = _Enum
+    rosgraph_msgs_msg_module.Clock = Clock
+    rosgraph_msgs_module.msg = rosgraph_msgs_msg_module
+    px4_msgs_msg_module.ArmJointState = ArmJointState
+    px4_msgs_module.msg = px4_msgs_msg_module
 
     launch_module.actions = launch_actions_module
     launch_module.event_handlers = launch_event_handlers_module
@@ -93,6 +138,12 @@ def _load_launch_common_module() -> ModuleType:
     sys.modules["launch.event_handlers"] = launch_event_handlers_module
     sys.modules["launch_ros"] = launch_ros_module
     sys.modules["launch_ros.actions"] = launch_ros_actions_module
+    sys.modules["rclpy"] = rclpy_module
+    sys.modules["rclpy.qos"] = rclpy_qos_module
+    sys.modules["rosgraph_msgs"] = rosgraph_msgs_module
+    sys.modules["rosgraph_msgs.msg"] = rosgraph_msgs_msg_module
+    sys.modules["px4_msgs"] = px4_msgs_module
+    sys.modules["px4_msgs.msg"] = px4_msgs_msg_module
 
     module_path = (
         Path(__file__).resolve().parents[1]
@@ -204,6 +255,14 @@ class ROS2LaunchCommonTests(unittest.TestCase):
         self.assertEqual(len(bridge_nodes), 1)
         self.assertEqual(bridge_nodes[0].name, "acesim_bridge")
 
+    def test_build_px4_additional_env_keeps_required_launch_overrides(self) -> None:
+        with patch.object(self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("x500_arm2x")):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                additional_env = self.launch_common.build_px4_additional_env()
+
+        self.assertEqual(additional_env["PX4_PARAM_COM_MODE_ARM_CHK"], "1")
+        self.assertNotIn("PX4_PARAM_AM_POS_MANL_CTRL", additional_env)
+
     def test_load_bridge_entries_returns_all_configured_bridge_names(self) -> None:
         config_text = """
 bridges:
@@ -214,20 +273,13 @@ bridges:
       type: zmq_sub
       endpoint: tcp://127.0.0.1:5600
     topic: /acesim/clock
-  arm_command_ros:
+  arm_state:
     enabled: true
     poll_period_sec: 0.001
     transport:
       type: zmq_sub
-      endpoint: tcp://127.0.0.1:5602
-    topic: /arm/command
-  arm_command_px4:
-    enabled: true
-    poll_period_sec: 0.001
-    transport:
-      type: zmq_sub
-      endpoint: tcp://127.0.0.1:5602
-    topic: /fmu/in/arm_joint_command
+      endpoint: tcp://127.0.0.1:5603
+    topic: /fmu/in/arm_joint_state
 """
         config_path = Path(self.id().replace(".", "_") + ".yaml")
         try:
@@ -236,12 +288,10 @@ bridges:
         finally:
             config_path.unlink(missing_ok=True)
 
-        self.assertEqual(
-            [bridge["name"] for bridge in bridges], ["simulation_clock", "arm_command_ros", "arm_command_px4"]
-        )
+        self.assertEqual([bridge["name"] for bridge in bridges], ["simulation_clock", "arm_state"])
         self.assertEqual(
             [bridge["endpoint"] for bridge in bridges],
-            ["tcp://127.0.0.1:5600", "tcp://127.0.0.1:5602", "tcp://127.0.0.1:5602"],
+            ["tcp://127.0.0.1:5600", "tcp://127.0.0.1:5603"],
         )
 
     def test_load_bridge_entries_rejects_invalid_tcp_endpoint(self) -> None:
@@ -329,8 +379,6 @@ bridges:
             overrides["overrides"],
             {
                 "simulation_clock": {"input_endpoint": "tcp://127.0.0.1:5600"},
-                "arm_command_ros": {"input_endpoint": "tcp://127.0.0.1:5602"},
-                "arm_command_px4": {"input_endpoint": "tcp://127.0.0.1:5602"},
                 "arm_state": {"input_endpoint": "tcp://127.0.0.1:5603"},
             },
         )
@@ -355,8 +403,6 @@ bridges:
             overrides["overrides"],
             {
                 "simulation_clock": {"input_endpoint": "tcp://172.20.32.1:5600"},
-                "arm_command_ros": {"input_endpoint": "tcp://172.20.32.1:5602"},
-                "arm_command_px4": {"input_endpoint": "tcp://172.20.32.1:5602"},
                 "arm_state": {"input_endpoint": "tcp://172.20.32.1:5603"},
             },
         )

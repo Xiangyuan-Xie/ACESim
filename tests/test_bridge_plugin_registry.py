@@ -20,7 +20,7 @@ class BridgePluginRegistryTests(unittest.TestCase):
     def test_registry_contains_all_supported_bridge_plugins(self) -> None:
         self.assertEqual(
             tuple(self.plugin_registry.PLUGIN_REGISTRY),
-            ("simulation_clock", "arm_command_ros", "arm_command_px4", "arm_state"),
+            ("simulation_clock", "arm_state"),
         )
 
 

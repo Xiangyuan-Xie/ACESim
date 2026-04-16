@@ -27,20 +27,20 @@ class BridgeConfigLoaderTests(unittest.TestCase):
             config_path.write_text(
                 textwrap.dedent("""
                     bridges:
-                      arm_command_ros:
+                      arm_state:
                         enabled: true
                         transport:
                           type: zmq_sub
-                          endpoint: tcp://127.0.0.1:5602
-                        topic: /arm/command
+                          endpoint: tcp://127.0.0.1:5603
+                        topic: /fmu/in/arm_joint_state
                     """).strip() + "\n",
                 encoding="utf-8",
             )
             overrides_path.write_text(
                 textwrap.dedent("""
                     overrides:
-                      arm_command_ros:
-                        input_endpoint: tcp://172.20.32.1:5602
+                      arm_state:
+                        input_endpoint: tcp://172.20.32.1:5603
                     """).strip() + "\n",
                 encoding="utf-8",
             )
@@ -49,11 +49,11 @@ class BridgeConfigLoaderTests(unittest.TestCase):
 
         self.assertEqual(len(bridge_configs), 1)
         bridge_config = bridge_configs[0]
-        self.assertEqual(bridge_config.name, "arm_command_ros")
+        self.assertEqual(bridge_config.name, "arm_state")
         self.assertEqual(bridge_config.poll_period_sec, 0.001)
-        self.assertEqual(bridge_config.topic, "/arm/command")
-        self.assertEqual(bridge_config.joint_names, ["joint1", "joint2", "joint3", "joint4", "joint5"])
-        self.assertEqual(bridge_config.override.input_endpoint, "tcp://172.20.32.1:5602")
+        self.assertEqual(bridge_config.topic, "/fmu/in/arm_joint_state")
+        self.assertIsNone(bridge_config.joint_names)
+        self.assertEqual(bridge_config.override.input_endpoint, "tcp://172.20.32.1:5603")
 
     def test_load_bridge_configs_rejects_unknown_bridge_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

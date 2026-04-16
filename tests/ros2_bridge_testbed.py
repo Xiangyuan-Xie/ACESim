@@ -63,11 +63,6 @@ def install_fake_ros2_bridge_dependencies() -> None:
             self.velocity: list[float] = []
             self.effort: list[float] = []
 
-    class ArmJointCommand:
-        def __init__(self) -> None:
-            self.timestamp = 0
-            self.arm_command: list[float] = []
-
     class ArmJointState:
         def __init__(self) -> None:
             self.timestamp = 0
@@ -147,7 +142,6 @@ def install_fake_ros2_bridge_dependencies() -> None:
     setattr(rosgraph_msgs_module, "msg", rosgraph_msgs_msg_module)
     setattr(sensor_msgs_msg_module, "JointState", JointState)
     setattr(sensor_msgs_module, "msg", sensor_msgs_msg_module)
-    setattr(px4_msgs_msg_module, "ArmJointCommand", ArmJointCommand)
     setattr(px4_msgs_msg_module, "ArmJointState", ArmJointState)
     setattr(px4_msgs_module, "msg", px4_msgs_msg_module)
 
