@@ -115,9 +115,6 @@ def build_px4_additional_env() -> dict[str, str]:
             # Keep external modes registered and checked while armed so the
             # internally hosted RL mode remains selectable after takeoff.
             "PX4_PARAM_COM_MODE_ARM_CHK": "1",
-            # Default to hold/trajectory behavior instead of requiring a live
-            # manual-control signal to enter the RL mode.
-            "PX4_PARAM_RL_ARM_MANL_CTRL": "0",
         }
     )
     if sensor_params.fusion_mode == "hil":

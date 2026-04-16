@@ -6,20 +6,6 @@ bridges:
       type: zmq_sub
       endpoint: tcp://127.0.0.1:5600
     topic: /acesim/clock
-  arm_command_ros:
-    enabled: true
-    poll_period_sec: 0.001
-    transport:
-      type: zmq_sub
-      endpoint: tcp://127.0.0.1:5602
-    topic: /arm/command
-  arm_command_px4:
-    enabled: true
-    poll_period_sec: 0.001
-    transport:
-      type: zmq_sub
-      endpoint: tcp://127.0.0.1:5602
-    topic: /fmu/in/arm_joint_command
   arm_state:
     enabled: true
     poll_period_sec: 0.001
