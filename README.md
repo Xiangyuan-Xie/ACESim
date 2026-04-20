@@ -121,6 +121,12 @@ ros2 launch acesim_ros2 linux.launch.py
 
 ROS 2 包位于 `acesim/deploy/aircraft/acesim_ros2`，推荐在完整部署、bridge、时钟同步和联调场景下使用。
 
+对于 ACESim 中的 AM Position：
+- 需要有效的 manual-control source，例如 QGC virtual joystick 或 RC。
+- 这一要求由模式实现本身固定提供，与 Position 模式对齐，而不是由 launch 参数覆写决定。
+- 摇杆回中不会阻止进入模式，而是进入保持行为。
+- 如果修改了 `acesim/deploy/aircraft/px4_msgs` 下的 `.msg` / `.srv` 接口，首次需要对 ROS 2 工作区做一次 clean rebuild。
+
 补充入口：
 
 - headless launch：`acesim/deploy/aircraft/acesim_ros2/launch/linux_headless.launch.py`
