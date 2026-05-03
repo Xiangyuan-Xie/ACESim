@@ -263,6 +263,21 @@ class ROS2LaunchCommonTests(unittest.TestCase):
         self.assertEqual(additional_env["PX4_PARAM_COM_MODE_ARM_CHK"], "1")
         self.assertNotIn("PX4_PARAM_AM_POS_MANL_CTRL", additional_env)
 
+    def test_build_px4_additional_env_does_not_override_am_offboard_mode_in_mocap_mode(self) -> None:
+        mocap_params = _FakePX4SensorParams()
+        mocap_params.fusion_mode = "mocap"
+
+        class _FakeMocapPX4SensorParams:
+            @classmethod
+            def from_asset_params(cls, asset_params: dict[str, object], dynamic_hil_sensor_fields: bool = False):
+                return mocap_params
+
+        with patch.object(self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("x500_arm2x")):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakeMocapPX4SensorParams):
+                additional_env = self.launch_common.build_px4_additional_env()
+
+        self.assertNotIn("PX4_PARAM_AMPC_OFFB_EN", additional_env)
+
     def test_load_bridge_entries_returns_all_configured_bridge_names(self) -> None:
         config_text = """
 bridges:
@@ -334,9 +349,7 @@ bridges:
             config_path.unlink(missing_ok=True)
 
     def test_build_launch_entities_uses_default_bridge_config_path(self) -> None:
-        with patch.object(
-            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("x500", env_type="mc_arm")
-        ):
+        with patch.object(self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("x500", env_type="am")):
             with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
                 entities = self.launch_common.build_launch_entities(
                     "/tmp/px4",
@@ -428,6 +441,40 @@ bridges:
         parameter_dict = next(item for item in bridge_node.parameters if isinstance(item, dict))
         self.assertIn("bridge_overrides_file", parameter_dict)
         self.assertTrue(parameter_dict["bridge_overrides_file"].endswith(".yaml"))
+
+    def test_build_launch_entities_sets_unbuffered_python_output_for_bridge_node(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities("/tmp/px4", enable_px4_post_start_setup=False)
+
+        bridge_node = next(entity for entity in entities if getattr(entity, "executable", None) == "acesim_bridge")
+        self.assertTrue(bridge_node.kwargs["emulate_tty"])
+        self.assertEqual(bridge_node.kwargs["additional_env"]["PYTHONUNBUFFERED"], "1")
+
+    def test_build_launch_entities_sets_unbuffered_python_output_for_play_node(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities("/tmp/px4")
+
+        register_handler = next(entity for entity in entities if getattr(entity, "event_handler", None) is not None)
+        play_node = register_handler.event_handler.on_start[0].actions[0]
+        self.assertEqual(play_node.executable, "acesim_play")
+        self.assertTrue(play_node.kwargs["emulate_tty"])
+        self.assertEqual(play_node.kwargs["additional_env"]["PYTHONUNBUFFERED"], "1")
+
+    def test_build_px4_post_start_setup_process_sets_unbuffered_python_output(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                process = self.launch_common.build_px4_post_start_setup_process()
+
+        self.assertTrue(process.kwargs["emulate_tty"])
+        self.assertEqual(process.additional_env["PYTHONUNBUFFERED"], "1")
 
     def test_launch_common_uses_non_private_helper_names(self) -> None:
         self.assertTrue(hasattr(self.launch_common, "resolve_px4_startup_env"))

@@ -6,14 +6,14 @@ import tomli
 _ENV_MAP = {
     "mujoco": {
         "mc": ("acesim.env.mujoco.mc_env", "MCEnv"),
-        "mc_arm": ("acesim.env.mujoco.mc_arm_env", "MCArmEnv"),
+        "am": ("acesim.env.mujoco.am_env", "AMEnv"),
         "fw": ("acesim.env.mujoco.fw_env", "FWEnv"),
         "vtol": ("acesim.env.mujoco.vtol_env", "VTOLEnv"),
         "uuv": ("acesim.env.mujoco.uuv_env", "UUVEnv"),
     },
     "genesis": {
         "mc": ("acesim.env.genesis.mc_env", "MCEnv"),
-        "mc_arm": ("acesim.env.genesis.mc_arm_env", "MCArmEnv"),
+        "am": ("acesim.env.genesis.am_env", "AMEnv"),
     },
 }
 

@@ -8,7 +8,7 @@ import sys
 import tempfile
 import textwrap
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 if __package__ in (None, ""):
     package_parent = Path(__file__).resolve().parents[1]
@@ -355,6 +355,17 @@ def build_px4_post_start_command(sensor_params: PX4SensorParams) -> list[str]:
     ]
 
 
+def python_launch_kwargs(*, additional_env: Optional[dict[str, str]] = None) -> dict[str, Any]:
+    merged_env = {"PYTHONUNBUFFERED": "1"}
+    if additional_env:
+        merged_env.update(additional_env)
+    return {
+        "output": "screen",
+        "emulate_tty": True,
+        "additional_env": merged_env,
+    }
+
+
 def build_px4_post_start_setup_process() -> ExecuteProcess:
     sensor_params = PX4SensorParams.from_asset_params(
         ConfigLoader().get_asset_params(),
@@ -362,7 +373,7 @@ def build_px4_post_start_setup_process() -> ExecuteProcess:
     )
     return ExecuteProcess(
         cmd=build_px4_post_start_command(sensor_params),
-        output="screen",
+        **python_launch_kwargs(),
     )
 
 
@@ -417,7 +428,7 @@ def build_launch_entities(
                     "bridge_overrides_file": overrides_file,
                 },
             ],
-            output="screen",
+            **python_launch_kwargs(),
         ),
     ]
 
@@ -430,7 +441,7 @@ def build_launch_entities(
         acesim_play = Node(
             package="acesim_ros2",
             executable=play_executable,
-            output="screen",
+            **python_launch_kwargs(),
         )
         entities.append(
             RegisterEventHandler(

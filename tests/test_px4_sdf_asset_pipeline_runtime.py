@@ -10,7 +10,6 @@ from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.fw_env import FWEnv
 from acesim.env.mujoco.uuv_env import UUVEnv
 from acesim.env.mujoco.vtol_env import VTOLEnv
-from acesim.utils.simulation_clock import SimulationClock
 
 
 def _config_path(name: str) -> Path:
@@ -58,9 +57,20 @@ class _FakeVisualPublisher:
         return None
 
 
+class _FakeClockPublisher:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    def publish(self, timestamp_us: int) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
 @patch("acesim.env.mujoco.px4_mj_env.VehicleVisualStatePublisher", _FakeVisualPublisher)
 @patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _FakePX4Transport)
-@patch("acesim.env.mujoco.mj_env.SimulationClock", lambda: SimulationClock(enable_zmq=False))
+@patch("acesim.env.mujoco.mj_env.ClockPublisher", _FakeClockPublisher)
 class PX4SDFAssetPipelineRuntimeTests(unittest.TestCase):
     def test_runtime_rotor_marker_bodies_are_zero_mass_and_visual_rotors_are_mocap_only(self) -> None:
         expectations = {

@@ -84,9 +84,6 @@ class BridgeRuntimeTests(unittest.TestCase):
         transport.close()
         self.assertTrue(socket.closed)
 
-    def test_bridge_runtime_registry_no_longer_contains_arm_command_px4(self) -> None:
-        self.assertNotIn("arm_command_px4", self.plugin_registry.PLUGIN_REGISTRY)
-
     def test_bridge_host_builds_runtime_and_publishes(self) -> None:
         node = _FakeNode()
         bridge_config = self.config_loader.BridgeConfig(

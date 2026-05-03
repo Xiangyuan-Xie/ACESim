@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import struct
 from typing import Any, Callable
 
 from acesim_ros2.bridge.plugin_api import BridgeConfig, BridgePluginSpec
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rosgraph_msgs.msg import Clock
 
-_CLOCK_STRUCT = struct.Struct("<Q")
+from acesim.utils.sim_streams import ClockCodec
 
 
 def apply_defaults(raw_bridge: dict[str, object]) -> dict[str, object]:
@@ -15,9 +14,7 @@ def apply_defaults(raw_bridge: dict[str, object]) -> dict[str, object]:
 
 
 def decode_payload(payload: bytes) -> int:
-    if len(payload) != _CLOCK_STRUCT.size:
-        raise ValueError(f"Unexpected clock payload size={len(payload)}, expected {_CLOCK_STRUCT.size}")
-    return int(_CLOCK_STRUCT.unpack(payload)[0])
+    return ClockCodec.unpack(payload)
 
 
 def extract_timestamp_us(decoded: int) -> int:

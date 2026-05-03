@@ -1,4 +1,4 @@
-"""Arm control and state scheduler for the manipulator stack used by ``MCArmEnv``.
+"""Arm control and state scheduler for the manipulator stack used by ``AMEnv``.
 
 The scheduler is intentionally narrow in scope: one periodic loop samples arm
 control targets and another periodic loop publishes the current arm state.
@@ -41,7 +41,6 @@ class ArmServoScheduler:
         read_control_target: Callable[[], ArmControlSample | None],
         apply_control: Callable[[ArmControlSample], None],
         read_state: Callable[[], ArmStateSample],
-        publish_control: Callable[[int, ArmControlSample], None] | None = None,
     ) -> None:
         if control_rate_hz <= 0.0:
             raise ValueError("control_rate_hz must be positive")
@@ -52,7 +51,6 @@ class ArmServoScheduler:
         self._publisher: ArmStatePublisher = publisher
         self._read_control_target: Callable[[], ArmControlSample | None] = read_control_target
         self._apply_control: Callable[[ArmControlSample], None] = apply_control
-        self._publish_control: Callable[[int, ArmControlSample], None] | None = publish_control
         self._read_state: Callable[[], ArmStateSample] = read_state
         self._control_period_s: float = 1.0 / float(control_rate_hz)
         self._state_publish_period_s: float = 1.0 / float(state_publish_rate_hz)
@@ -85,8 +83,6 @@ class ArmServoScheduler:
             control_sample = self._read_control_target()
             if control_sample is not None:
                 self._apply_control(control_sample)
-                if self._publish_control is not None:
-                    self._publish_control(current_time_us, control_sample)
 
         self._state_publish_elapsed_s += dt_s
         state_due = False

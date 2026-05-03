@@ -9,7 +9,6 @@ from typing import Protocol
 from unittest.mock import patch
 
 from acesim.config.config_loader import ConfigLoader
-from acesim.utils.simulation_clock import SimulationClock
 
 
 class _FakePX4Transport:
@@ -60,14 +59,12 @@ class _FakeArmStatePublisher:
         return None
 
 
-class _FakeArmCommandPublisher:
-    publish_calls: list[tuple[int, object]] = []
-
+class _FakeClockPublisher:
     def __init__(self, *args: object, **kwargs: object) -> None:
         return None
 
-    def publish(self, timestamp_us: int, joint_positions: object) -> None:
-        self.publish_calls.append((timestamp_us, joint_positions))
+    def publish(self, timestamp_us: int) -> None:
+        return None
 
     def close(self) -> None:
         return None
@@ -95,12 +92,11 @@ def _config_path(name: str) -> Path:
     return (Path(__file__).resolve().parents[1] / "acesim" / "config" / f"{name}.toml").resolve()
 
 
-@patch("acesim.env.mujoco.mc_arm_env.make_robot", lambda: _FakeRobotAgent())
-@patch("acesim.env.mujoco.mc_arm_env.ArmCommandPublisher", _FakeArmCommandPublisher)
-@patch("acesim.env.mujoco.mc_arm_env.ArmStatePublisher", _FakeArmStatePublisher)
+@patch("acesim.env.mujoco.am_env.make_robot", lambda: _FakeRobotAgent())
+@patch("acesim.env.mujoco.am_env.ArmStatePublisher", _FakeArmStatePublisher)
 @patch("acesim.env.mujoco.px4_mj_env.VehicleVisualStatePublisher", _FakeVisualPublisher)
 @patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _FakePX4Transport)
-@patch("acesim.env.mujoco.mj_env.SimulationClock", lambda: SimulationClock(enable_zmq=False))
+@patch("acesim.env.mujoco.mj_env.ClockPublisher", _FakeClockPublisher)
 class MujocoHeadlessStartupTests(unittest.TestCase):
     def _instantiate_and_step(self, config_file: Path) -> _SupportsHeadlessEnv:
         loader = ConfigLoader(config_file)
@@ -138,7 +134,6 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
         return config_path
 
     def test_default_config_starts_headless(self) -> None:
-        _FakeArmCommandPublisher.publish_calls.clear()
         expected_loader = ConfigLoader(_config_path("default"))
         env = self._instantiate_and_step(_config_path("default"))
         try:

@@ -13,7 +13,6 @@ from acesim.env.mujoco.fw_env import FWEnv
 from acesim.env.mujoco.px4_mj_env import PX4MJEnv
 from acesim.env.mujoco.uuv_env import UUVEnv
 from acesim.env.mujoco.vtol_env import VTOLEnv
-from acesim.utils.simulation_clock import SimulationClock
 
 
 class _FakePX4Transport:
@@ -53,6 +52,17 @@ class _FakeVisualPublisher:
         return None
 
 
+class _FakeClockPublisher:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    def publish(self, timestamp_us: int) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
 class _MujocoModelLike(Protocol):
     sensor_adr: np.ndarray
     sensor_dim: np.ndarray
@@ -81,7 +91,7 @@ def _set_sensor(env: _SupportsSensorSeeding, sensor_name: str, values: np.ndarra
 
 @patch("acesim.env.mujoco.px4_mj_env.VehicleVisualStatePublisher", _FakeVisualPublisher)
 @patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _FakePX4Transport)
-@patch("acesim.env.mujoco.mj_env.SimulationClock", lambda: SimulationClock(enable_zmq=False))
+@patch("acesim.env.mujoco.mj_env.ClockPublisher", _FakeClockPublisher)
 class MujocoVehicleDynamicsTests(unittest.TestCase):
     def _seed_kinematics(
         self, env: PX4MJEnv, pos: np.ndarray, linvel: np.ndarray, gyro: np.ndarray | None = None

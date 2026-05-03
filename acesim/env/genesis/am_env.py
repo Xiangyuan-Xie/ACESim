@@ -1,4 +1,4 @@
-"""Genesis multicopter environment extended with the manipulator control stack."""
+"""Genesis aerial manipulator environment with the manipulator control stack."""
 
 from acetele.core.make_robot import make_robot
 
@@ -6,8 +6,8 @@ from acesim.config.config_loader import ConfigLoader
 from acesim.env.genesis.mc_env import MCEnv
 
 
-class MCArmEnv(MCEnv):
-    """Genesis multicopter environment with an attached arm control agent."""
+class AMEnv(MCEnv):
+    """Genesis aerial manipulator environment with an attached arm control agent."""
 
     def __init__(self, config_loader: ConfigLoader):
         super().__init__(config_loader)

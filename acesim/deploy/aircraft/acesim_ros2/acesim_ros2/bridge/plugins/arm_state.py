@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import struct
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -8,7 +7,7 @@ from acesim_ros2.bridge.plugin_api import BridgeConfig, BridgePluginSpec
 from px4_msgs.msg import ArmJointState
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
-_ARM_STATE_STRUCT = struct.Struct("<Q15d")
+from acesim.utils.sim_streams import ArmStateCodec
 
 
 @dataclass(frozen=True)
@@ -23,13 +22,11 @@ def apply_defaults(raw_bridge: dict[str, object]) -> dict[str, object]:
 
 
 def decode_payload(payload: bytes) -> DecodedArmState:
-    if len(payload) != _ARM_STATE_STRUCT.size:
-        raise ValueError(f"Unexpected arm-state payload size={len(payload)}, expected {_ARM_STATE_STRUCT.size}")
-    decoded = _ARM_STATE_STRUCT.unpack(payload)
+    decoded = ArmStateCodec.unpack(payload)
     return DecodedArmState(
-        timestamp_us=int(decoded[0]),
-        position=[float(value) for value in decoded[1:6]],
-        velocity=[float(value) for value in decoded[6:11]],
+        timestamp_us=int(decoded["timestamp_us"]),
+        position=list(decoded["positions"]),
+        velocity=list(decoded["velocities"]),
     )
 
 

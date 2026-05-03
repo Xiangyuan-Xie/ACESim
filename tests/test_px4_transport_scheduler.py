@@ -144,7 +144,7 @@ class PX4TransportSchedulerTests(unittest.TestCase):
         diff_pressure_hpa: float | None,
         temperature_celsius: float = 25.0,
     ) -> tuple[SimulationClock, _FakeTransport, PX4SensorScheduler]:
-        clock = SimulationClock(enable_zmq=False)
+        clock = SimulationClock()
         transport = _FakeTransport()
         params = PX4SensorParams(
             fusion_mode="hil",

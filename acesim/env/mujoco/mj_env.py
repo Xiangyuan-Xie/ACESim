@@ -9,6 +9,7 @@ import mujoco.viewer
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.base_env import BaseEnv
+from acesim.utils.sim_streams import ClockPublisher
 from acesim.utils.simulation_clock import SimulationClock
 
 
@@ -39,7 +40,9 @@ class MJEnv(BaseEnv):
         mujoco.set_mjcb_control(self._control)
 
         self._sim_clock = SimulationClock()
+        self._clock_publisher = ClockPublisher()
         self._step_count = 0
+        self._publish_clock()
 
     @property
     def _simulation_time_us(self) -> int:
@@ -52,16 +55,21 @@ class MJEnv(BaseEnv):
         """Reset the shared simulation clock to an absolute timestamp."""
 
         self._sim_clock.reset(value)
+        self._publish_clock()
 
     def _advance_simulation_time_us(self, delta_us: int) -> int:
         """Advance the shared simulation clock by a microsecond delta."""
 
-        return self._sim_clock.advance_us(delta_us)
+        timestamp_us = self._sim_clock.advance_us(delta_us)
+        self._publish_clock()
+        return timestamp_us
 
     def _advance_simulation_time_seconds(self, dt_s: float) -> int:
         """Advance the shared simulation clock by seconds."""
 
-        return self._sim_clock.advance_seconds(dt_s)
+        timestamp_us = self._sim_clock.advance_seconds(dt_s)
+        self._publish_clock()
+        return timestamp_us
 
     def run(self):
         """Launch MuJoCo's interactive viewer."""
@@ -77,7 +85,11 @@ class MJEnv(BaseEnv):
         """Release the shared simulation clock owned by the base backend."""
 
         mujoco.set_mjcb_control(None)
+        self._clock_publisher.close()
         self._sim_clock.close()
+
+    def _publish_clock(self) -> None:
+        self._clock_publisher.publish(self._simulation_time_us)
 
     def _merge_scene_robot_xml(self, scene_path: Path, robot_path: Path) -> str:
         """Merge a scene XML tree with an asset XML tree into one MJCF string."""

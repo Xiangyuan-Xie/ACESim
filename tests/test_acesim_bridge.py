@@ -377,7 +377,6 @@ class AcesimBridgeTests(unittest.TestCase):
         self.assertFalse(hasattr(self.acesim_bridge, "HandlerRuntimeSpec"))
         self.assertFalse(hasattr(self.acesim_bridge, "CompiledBridgeRuntime"))
         self.assertFalse(hasattr(self.acesim_bridge, "normalize_joint_values"))
-        self.assertFalse(hasattr(self.acesim_bridge, "decode_arm_command_payload"))
         self.assertFalse(hasattr(self.acesim_bridge, "decode_arm_state_payload"))
         self.assertFalse(hasattr(self.acesim_bridge, "BRIDGE_REGISTRY"))
         self.assertFalse(hasattr(self.acesim_bridge, "zmq"))
