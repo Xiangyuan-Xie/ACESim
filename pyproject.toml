@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=65.5.0", "wheel"]
+requires = ["setuptools>=59.6.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -28,6 +28,8 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["acesim", "acesim.*"]
+exclude = ["acesim.third_party", "acesim.third_party.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
