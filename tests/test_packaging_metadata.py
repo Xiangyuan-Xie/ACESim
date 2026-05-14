@@ -37,3 +37,13 @@ def test_pyproject_package_discovery_excludes_third_party_sources() -> None:
         "acesim.third_party",
         "acesim.third_party.*",
     ]
+
+
+def test_sim_backends_are_optional_pyproject_dependencies() -> None:
+    project_config = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+
+    assert "mujoco" not in project_config["dependencies"]
+    assert "genesis-world" not in project_config["dependencies"]
+    assert project_config["optional-dependencies"]["mujoco"] == ["mujoco"]
+    assert project_config["optional-dependencies"]["genesis"] == ["genesis-world"]
+    assert project_config["optional-dependencies"]["all"] == ["mujoco", "genesis-world"]

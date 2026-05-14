@@ -102,23 +102,41 @@ python -m acesim.tools.render_readme_assets
 
 ## 快速开始
 
-最小 Python 依赖来自 `pyproject.toml` / `requirements.txt`：
+默认安装只包含公共 Python 依赖；仿真后端通过 extras 按需安装：
 
-- `mujoco`
-- `genesis-world`
 - `numpy`
 - `scipy`
 - `tqdm`
 - `pymavlink`
 - `pyzmq`
 
+可选后端依赖如下：
+
+- `.[mujoco]`：安装 MuJoCo 后端所需的 `mujoco`
+- `.[genesis]`：安装 Genesis 后端所需的 `genesis-world`
+- `.[all]`：同时安装 MuJoCo 与 Genesis 后端
+
 ### 推荐：ROS 2 部署
+
+当前默认配置使用 `sim_type = "mujoco"`，因此推荐安装 MuJoCo extra：
 
 ```bash
 git clone https://github.com/Xiangyuan-Xie/ACESim.git
 cd ACESim
-pip install -e .
+pip install -e ".[mujoco]"
 ros2 launch acesim_ros2 linux.launch.py
+```
+
+如果只需要 Genesis 后端，可以改用：
+
+```bash
+pip install -e ".[genesis]"
+```
+
+如果希望一次安装全部后端：
+
+```bash
+pip install -e ".[all]"
 ```
 
 ROS 2 包位于 `acesim/deploy/aircraft/acesim_ros2`，推荐在完整部署、bridge、时钟同步和联调场景下使用。
@@ -140,6 +158,7 @@ ROS 2 包位于 `acesim/deploy/aircraft/acesim_ros2`，推荐在完整部署、b
 如果只做本地验证，可以直接运行：
 
 ```bash
+pip install -e ".[mujoco]"
 python -m acesim.core.play
 ```
 

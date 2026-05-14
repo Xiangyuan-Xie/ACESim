@@ -15,14 +15,17 @@ setup(
     ],
     python_requires=">=3.9",
     install_requires=[
-        "mujoco",
-        "genesis-world",
         "numpy",
         "scipy",
         "tqdm",
         "pymavlink",
         "pyzmq",
     ],
+    extras_require={
+        "mujoco": ["mujoco"],
+        "genesis": ["genesis-world"],
+        "all": ["mujoco", "genesis-world"],
+    },
     packages=find_namespace_packages(
         where=".",
         include=["acesim", "acesim.*"],

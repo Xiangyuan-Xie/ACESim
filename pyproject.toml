@@ -17,13 +17,23 @@ classifiers = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "mujoco",
-    "genesis-world",
     "numpy",
     "scipy",
     "tqdm",
     "pymavlink",
     "pyzmq",
+]
+
+[project.optional-dependencies]
+mujoco = [
+    "mujoco",
+]
+genesis = [
+    "genesis-world",
+]
+all = [
+    "mujoco",
+    "genesis-world",
 ]
 
 [tool.setuptools.packages.find]
