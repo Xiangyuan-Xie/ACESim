@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TypedDict
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import tomli
+from scipy.spatial.transform import Rotation
 
 from acesim.utils.px4_sensor_scheduler import PX4SensorSample, PX4SensorScheduler
 from acesim.utils.px4_transport import PX4ActuatorParams, PX4SensorParams, PX4Transport
@@ -69,10 +72,13 @@ class _FakeTransport:
         temperature_celsius: float
         fields_updated: int
 
+    class _VisionCall(TypedDict):
+        args: tuple[int, np.ndarray, np.ndarray]
+
     def __init__(self) -> None:
         self.hil_sensor_calls: list[_FakeTransport._HilSensorCall] = []
         self.hil_gps_calls: list[dict[str, object]] = []
-        self.vision_calls: list[dict[str, object]] = []
+        self.vision_calls: list[_FakeTransport._VisionCall] = []
 
     def send_hil_sensor(
         self,
@@ -134,10 +140,44 @@ class _FakeTransport:
         position_world_m: np.ndarray,
         attitude_world_quat: np.ndarray,
     ) -> None:
-        self.vision_calls.append({"args": (timestamp_us, position_world_m, attitude_world_quat)})
+        self.vision_calls.append(
+            {
+                "args": (
+                    timestamp_us,
+                    position_world_m,
+                    attitude_world_quat,
+                )
+            }
+        )
 
 
 class PX4TransportSchedulerTests(unittest.TestCase):
+    def test_mocap_default_vision_noise_keeps_configured_fusion_defaults(self) -> None:
+        params = PX4SensorParams(fusion_mode="mocap")
+
+        self.assertAlmostEqual(params.ekf2_evp_noise, 0.003)
+        self.assertAlmostEqual(params.ekf2_eva_noise, 0.01)
+        self.assertFalse(hasattr(params, "vision_position_variance_m2"))
+        self.assertFalse(hasattr(params, "vision_orientation_variance_rad2"))
+
+    def test_mocap_asset_configs_keep_declared_fusion_parameters(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        config_paths = [
+            *sorted((repo_root / "acesim" / "config" / "mujoco").glob("*.toml")),
+            repo_root / "acesim" / "config" / "genesis" / "x500_arm2x.toml",
+        ]
+
+        for config_path in config_paths:
+            config = tomli.loads(config_path.read_text(encoding="utf-8"))
+            mocap_config = config.get("params", {}).get("px4_fusion", {}).get("mocap")
+            if mocap_config is None:
+                continue
+
+            with self.subTest(config=config_path.relative_to(repo_root)):
+                self.assertEqual(float(mocap_config["ekf2_evp_noise"]), 0.003)
+                self.assertEqual(float(mocap_config["ekf2_eva_noise"]), 0.01)
+                self.assertEqual(int(mocap_config["ekf2_mag_type"]), 0)
+
     def _make_scheduler(
         self,
         *,
@@ -212,6 +252,127 @@ class PX4TransportSchedulerTests(unittest.TestCase):
         self.assertFalse(fields_updated & PX4Transport.HIL_SENSOR_FIELDS_DIFF_PRESS)
         self.assertTrue(fields_updated & PX4Transport.HIL_SENSOR_FIELDS_ACCEL)
         self.assertTrue(fields_updated & PX4Transport.HIL_SENSOR_FIELDS_GYRO)
+        clock.close()
+
+    @patch("acesim.utils.px4_transport.mavutil.mavlink_connection")
+    def test_vision_position_estimate_uses_px4_default_covariance_behavior(self, mock_connection: MagicMock) -> None:
+        connection = _FakeConnection()
+        mock_connection.return_value = connection
+        transport = PX4Transport(PX4ActuatorParams())
+        transport._is_connected = True
+
+        transport.send_vision_position_estimate(
+            12_345,
+            np.array([1.0, 2.0, 3.0], dtype=float),
+            np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+        )
+
+        call = connection.mav.vision_calls[0]
+        self.assertEqual(len(call), 7)
+        transport.close()
+
+    def test_mocap_scheduler_does_not_override_vision_covariance(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=250.0,
+            vision_rate_hz=100.0,
+        )
+
+        def read_sample() -> PX4SensorSample:
+            return PX4SensorSample(
+                accel_frd=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro_frd=np.zeros(3, dtype=float),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=np.array([0.0, 0.0, 1.0], dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        clock.advance_us(10_000)
+        scheduler.update()
+
+        self.assertEqual(len(transport.vision_calls), 1)
+        call = transport.vision_calls[0]["args"]
+        self.assertEqual(len(call), 3)
+        clock.close()
+
+    def test_mocap_scheduler_filters_single_large_yaw_outlier(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=250.0,
+            vision_rate_hz=100.0,
+        )
+        quaternions = [
+            Rotation.from_euler("z", angle_deg, degrees=True).as_quat(scalar_first=True)
+            for angle_deg in (0.0, 82.7, 0.0)
+        ]
+
+        def read_sample() -> PX4SensorSample:
+            quat = quaternions.pop(0) if quaternions else quaternions[-1]
+            return PX4SensorSample(
+                accel_frd=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro_frd=np.zeros(3, dtype=float),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=np.array([0.0, 0.0, 1.0], dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.asarray(quat, dtype=float),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        clock.advance_us(10_000)
+        scheduler.update()
+        clock.advance_us(10_000)
+        scheduler.update()
+
+        self.assertEqual(len(transport.vision_calls), 1)
+        sent_quat = transport.vision_calls[0]["args"][2]
+        sent_yaw_deg = Rotation.from_quat(sent_quat, scalar_first=True).as_euler("zyx", degrees=True)[0]
+        self.assertAlmostEqual(sent_yaw_deg, 0.0, places=3)
+        clock.close()
+
+    def test_mocap_scheduler_allows_continuous_small_yaw_changes(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=250.0,
+            vision_rate_hz=100.0,
+        )
+        quaternions = [
+            Rotation.from_euler("z", angle_deg, degrees=True).as_quat(scalar_first=True)
+            for angle_deg in (0.0, 5.0, 10.0, 15.0)
+        ]
+
+        def read_sample() -> PX4SensorSample:
+            quat = (
+                quaternions.pop(0)
+                if quaternions
+                else Rotation.from_euler("z", 15.0, degrees=True).as_quat(scalar_first=True)
+            )
+            return PX4SensorSample(
+                accel_frd=np.array([0.0, 0.0, -9.81], dtype=float),
+                gyro_frd=np.zeros(3, dtype=float),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=np.array([0.0, 0.0, 1.0], dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.asarray(quat, dtype=float),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        for _ in range(3):
+            clock.advance_us(10_000)
+            scheduler.update()
+
+        sent_yaws = [
+            Rotation.from_quat(call["args"][2], scalar_first=True).as_euler("zyx", degrees=True)[0]
+            for call in transport.vision_calls
+        ]
+        np.testing.assert_allclose(sent_yaws, [5.0, 10.0, 15.0], atol=1e-6)
         clock.close()
 
 

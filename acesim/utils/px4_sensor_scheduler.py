@@ -14,6 +14,7 @@ from typing import Callable, Protocol, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.spatial.transform import Rotation
 
 from acesim.utils.frame import world_nwu_to_ned
 from acesim.utils.px4_transport import PX4SensorParams
@@ -174,6 +175,9 @@ class PX4SensorScheduler:
         self._last_temperature_celsius = float(sample.temperature_celsius)
         self._mag_pending = self._params.send_mag
         self._baro_pending = self._params.send_baro
+        self._last_sent_vision_quat: FloatArray | None = (
+            attitude_world_quat.copy() if self._params.send_vision else None
+        )
 
     def update(self) -> bool:
         """Send any PX4 HIL messages due at the current simulation time.
@@ -313,10 +317,21 @@ class PX4SensorScheduler:
                 self._vision_elapsed_s -= self._vision_period_s
                 vision_due = True
             if vision_due:
-                self._px4_transport.send_vision_position_estimate(
-                    current_time_us,
-                    position_world_m,
-                    attitude_world_quat,
-                )
+                if self._vision_attitude_is_plausible(attitude_world_quat):
+                    self._px4_transport.send_vision_position_estimate(
+                        current_time_us,
+                        position_world_m,
+                        attitude_world_quat,
+                    )
+                    self._last_sent_vision_quat = attitude_world_quat.copy()
 
         return sensor_sent
+
+    def _vision_attitude_is_plausible(self, attitude_world_quat: FloatArray) -> bool:
+        if self._last_sent_vision_quat is None:
+            return True
+
+        previous = Rotation.from_quat(self._last_sent_vision_quat, scalar_first=True)
+        current = Rotation.from_quat(attitude_world_quat, scalar_first=True)
+        delta_angle = (previous.inv() * current).magnitude()
+        return bool(np.isfinite(delta_angle) and delta_angle < np.deg2rad(45.0))
