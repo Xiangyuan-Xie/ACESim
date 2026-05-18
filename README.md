@@ -150,8 +150,24 @@ ROS 2 包位于 `acesim/deploy/aircraft/acesim_ros2`，推荐在完整部署、b
 补充入口：
 
 - headless launch：`acesim/deploy/aircraft/acesim_ros2/launch/linux_headless.launch.py`
+- UE 渲染 launch：`acesim/deploy/aircraft/acesim_ros2/launch/linux_ue.launch.py`
 - 可执行入口：`acesim_ros2.acesim_play`
 - headless 可执行入口：`acesim_ros2.acesim_play_headless`
+- UE 渲染可执行入口：`acesim_ros2.acesim_play_ue`
+
+`ros2 launch acesim_ros2 linux_ue.launch.py` 默认使用已打包的 UE runtime：
+
+```text
+/tmp/ACESim-unreal/packages/ACESimUE-Linux/Linux/ACESimUE
+```
+
+如果还没有打包，先运行：
+
+```bash
+bash acesim/tools/ue5/package_ue_runtime.sh
+```
+
+Editor 开发模式需要显式传 `ue_mode:=editor`，它会启动 `UnrealEditor <uproject> -game`，首次运行可能触发 shader/DDC 编译。
 
 ### 轻量：Python 入口
 
@@ -216,6 +232,8 @@ acesim/third_party/aircraft/PX4-Autopilot
 
 ### UE5 视觉流联调
 
+UE5 作为渲染前端使用，ACESim/MuJoCo 仍然是动力学权威。完整桥接流程、生成工程结构和预留传感器反馈端点见 `acesim/tools/ue5/README.md`。
+
 ACESim 支持把载具位姿与旋翼视觉状态通过 ZeroMQ 发布给外部渲染端。默认 endpoint 为：
 
 ```text
@@ -227,10 +245,11 @@ UE5 相关工具位于：
 - `acesim/tools/ue5/README.md`
 - `acesim/tools/ue5/check_ubuntu_ue5_host.sh`
 - `acesim/tools/ue5/setup_ubuntu_ue5.sh`
+- `acesim/tools/ue5/package_ue_runtime.sh`
 - `acesim/tools/ue5/create_project_scaffold.py`
 - `acesim/tools/ue5/verify_visual_stream.py`
 
-如果只是验证视觉流链路，建议先运行 `verify_visual_stream.py`；如果要完整搭建 UE5 项目，再阅读 `acesim/tools/ue5/README.md`。
+如果只是验证视觉流链路，建议先运行 `verify_visual_stream.py --samples 5 --timeout-sec 10`；如果要完整搭建 UE5 项目，再阅读 `acesim/tools/ue5/README.md`。ROS2 日常启动建议先打包，再用 `ros2 launch acesim_ros2 linux_ue.launch.py` 启动 packaged runtime。
 
 ## 资产与工具链
 
