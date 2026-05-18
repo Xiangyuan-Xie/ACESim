@@ -3,7 +3,7 @@ set -euo pipefail
 
 UE_ROOT="${UE_ROOT:-/tmp/ACESim-unreal}"
 UE_REPO_URL="${UE_REPO_URL:-git@github.com:EpicGames/UnrealEngine.git}"
-UE_REF="${UE_REF:-5.4.4-release}"
+UE_REF="${UE_REF:-5.7.4-release}"
 UE_LOG_DIR="${UE_LOG_DIR:-${UE_ROOT}/logs}"
 LOG_FILE="${UE_LOG_DIR}/host_check.txt"
 
@@ -43,12 +43,17 @@ mkdir -p "${UE_LOG_DIR}"
   else
     echo "nvidia_smi=blocked"
   fi
-  lsmod | rg '^nvidia' || true
+  if command -v rg >/dev/null 2>&1; then
+    lsmod | rg '^nvidia' || true
+  else
+    lsmod | grep -E '^nvidia' || true
+  fi
   ls -l /dev/nvidia* 2>/dev/null || true
   echo
 
   echo "[repo_access]"
-  if git ls-remote --heads "${UE_REPO_URL}" "${UE_REF}" >/dev/null 2>&1; then
+  repo_ref="$(git ls-remote --tags "${UE_REPO_URL}" "${UE_REF}" 2>/dev/null || true)"
+  if [ -n "${repo_ref}" ]; then
     echo "repo_access=ok"
   else
     echo "repo_access=blocked"
