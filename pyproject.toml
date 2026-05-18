@@ -27,6 +27,7 @@ dependencies = [
 [project.optional-dependencies]
 mujoco = [
     "mujoco",
+    "trimesh",
 ]
 genesis = [
     "genesis-world",
@@ -34,6 +35,7 @@ genesis = [
 all = [
     "mujoco",
     "genesis-world",
+    "trimesh",
 ]
 
 [tool.setuptools.packages.find]

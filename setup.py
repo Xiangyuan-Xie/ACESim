@@ -22,9 +22,9 @@ setup(
         "pyzmq",
     ],
     extras_require={
-        "mujoco": ["mujoco"],
+        "mujoco": ["mujoco", "trimesh"],
         "genesis": ["genesis-world"],
-        "all": ["mujoco", "genesis-world"],
+        "all": ["mujoco", "genesis-world", "trimesh"],
     },
     packages=find_namespace_packages(
         where=".",
