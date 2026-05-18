@@ -10,6 +10,7 @@ import zmq
 
 class ArmStatePayload(TypedDict):
     timestamp_us: int
+    joint_count: int
     positions: list[float]
     velocities: list[float]
     efforts: list[float]
@@ -32,10 +33,12 @@ class ClockCodec:
 
 
 class ArmStateCodec:
-    """Encode five exported arm joints as timestamp, positions, velocities, efforts."""
+    """Encode exported arm joints as timestamp, positions, velocities, efforts."""
 
-    JOINT_COUNT = 5
-    _STRUCT = struct.Struct("<Q15d")
+    JOINT_COUNT = 7
+    LEGACY_JOINT_COUNT = 5
+    _STRUCT = struct.Struct("<Q21d")
+    LEGACY_STRUCT = struct.Struct("<Q15d")
 
     @classmethod
     def pack(
@@ -57,14 +60,26 @@ class ArmStateCodec:
 
     @classmethod
     def unpack(cls, payload: bytes) -> ArmStatePayload:
-        if len(payload) != cls._STRUCT.size:
-            raise ValueError(f"Unexpected arm-state payload size={len(payload)}, expected {cls._STRUCT.size}")
-        decoded = cls._STRUCT.unpack(payload)
+        if len(payload) == cls._STRUCT.size:
+            struct_obj = cls._STRUCT
+            joint_count = cls.JOINT_COUNT
+        elif len(payload) == cls.LEGACY_STRUCT.size:
+            struct_obj = cls.LEGACY_STRUCT
+            joint_count = cls.LEGACY_JOINT_COUNT
+        else:
+            raise ValueError(
+                f"Unexpected arm-state payload size={len(payload)}, "
+                f"expected {cls._STRUCT.size} or {cls.LEGACY_STRUCT.size}"
+            )
+        decoded = struct_obj.unpack(payload)
+        positions_end = 1 + joint_count
+        velocities_end = positions_end + joint_count
         return {
             "timestamp_us": int(decoded[0]),
-            "positions": [float(value) for value in decoded[1:6]],
-            "velocities": [float(value) for value in decoded[6:11]],
-            "efforts": [float(value) for value in decoded[11:16]],
+            "joint_count": joint_count,
+            "positions": [float(value) for value in decoded[1:positions_end]],
+            "velocities": [float(value) for value in decoded[positions_end:velocities_end]],
+            "efforts": [float(value) for value in decoded[velocities_end:]],
         }
 
     @classmethod

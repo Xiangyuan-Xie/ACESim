@@ -97,6 +97,52 @@ class BridgePluginTests(unittest.TestCase):
         self.assertEqual(message.arm_position, [0.1, 0.2, 0.3, 0.4, 0.5])
         self.assertEqual(message.arm_velocity, [1.1, 1.2, 1.3, 1.4, 1.5])
 
+    def test_arm_state_plugin_trims_seven_joint_visual_payload_for_px4(self) -> None:
+        node = _FakeNode()
+        bridge_config = self.plugin_api.BridgeConfig(
+            name="arm_state",
+            enabled=True,
+            poll_period_sec=0.001,
+            transport=self.plugin_api.TransportConfig(type="zmq_sub", endpoint="tcp://127.0.0.1:5603"),
+            topic="/fmu/in/arm_joint_state",
+        )
+
+        sink = self.arm_state.build_sink(node, bridge_config)
+        sink(
+            self.arm_state.decode_payload(
+                struct.pack(
+                    "<Q21d",
+                    123456,
+                    0.1,
+                    0.2,
+                    0.3,
+                    0.4,
+                    0.5,
+                    -0.01,
+                    0.02,
+                    1.1,
+                    1.2,
+                    1.3,
+                    1.4,
+                    1.5,
+                    -0.1,
+                    0.2,
+                    9.1,
+                    9.2,
+                    9.3,
+                    9.4,
+                    9.5,
+                    -1.0,
+                    2.0,
+                )
+            )
+        )
+
+        message = node.publishers[0].messages[0]
+        self.assertEqual(message.timestamp, 123456)
+        self.assertEqual(message.arm_position, [0.1, 0.2, 0.3, 0.4, 0.5])
+        self.assertEqual(message.arm_velocity, [1.1, 1.2, 1.3, 1.4, 1.5])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,24 +46,51 @@ class SimStreamsTests(unittest.TestCase):
 
         self.assertEqual(ClockCodec.unpack(payload), 2_500_000)
 
-    def test_arm_state_codec_round_trips_five_joint_state_vectors(self) -> None:
+    def test_arm_state_codec_round_trips_seven_joint_state_vectors(self) -> None:
         payload = ArmStateCodec.pack(
             123456,
-            [0.1, 0.2, 0.3, 0.4, 0.5],
-            [1.1, 1.2, 1.3, 1.4, 1.5],
-            [9.1, 9.2, 9.3, 9.4, 9.5],
+            [0.1, 0.2, 0.3, 0.4, 0.5, -0.01, 0.02],
+            [1.1, 1.2, 1.3, 1.4, 1.5, -0.1, 0.2],
+            [9.1, 9.2, 9.3, 9.4, 9.5, -1.0, 2.0],
+        )
+
+        decoded = ArmStateCodec.unpack(payload)
+
+        self.assertEqual(decoded["timestamp_us"], 123456)
+        self.assertEqual(decoded["joint_count"], 7)
+        self.assertEqual(decoded["positions"], [0.1, 0.2, 0.3, 0.4, 0.5, -0.01, 0.02])
+        self.assertEqual(decoded["velocities"], [1.1, 1.2, 1.3, 1.4, 1.5, -0.1, 0.2])
+        self.assertEqual(decoded["efforts"], [9.1, 9.2, 9.3, 9.4, 9.5, -1.0, 2.0])
+
+    def test_arm_state_codec_unpacks_legacy_five_joint_payload(self) -> None:
+        payload = ArmStateCodec.LEGACY_STRUCT.pack(
+            123456,
+            0.1,
+            0.2,
+            0.3,
+            0.4,
+            0.5,
+            1.1,
+            1.2,
+            1.3,
+            1.4,
+            1.5,
+            9.1,
+            9.2,
+            9.3,
+            9.4,
+            9.5,
         )
 
         decoded = ArmStateCodec.unpack(payload)
 
         self.assertEqual(decoded["timestamp_us"], 123456)
         self.assertEqual(decoded["positions"], [0.1, 0.2, 0.3, 0.4, 0.5])
-        self.assertEqual(decoded["velocities"], [1.1, 1.2, 1.3, 1.4, 1.5])
-        self.assertEqual(decoded["efforts"], [9.1, 9.2, 9.3, 9.4, 9.5])
+        self.assertEqual(decoded["joint_count"], 5)
 
     def test_arm_state_codec_rejects_wrong_joint_count(self) -> None:
-        with self.assertRaisesRegex(ValueError, "positions must contain exactly 5 values"):
-            ArmStateCodec.pack(123456, [1.0, 2.0], [0.0] * 5, [0.0] * 5)
+        with self.assertRaisesRegex(ValueError, "positions must contain exactly 7 values"):
+            ArmStateCodec.pack(123456, [1.0, 2.0], [0.0] * 7, [0.0] * 7)
 
     def test_latest_zmq_publisher_uses_latest_sample_socket_options(self) -> None:
         with patch("acesim.utils.sim_streams.zmq.Context", _FakeContext):

@@ -45,7 +45,6 @@ class AMEnv(MCEnv):
         self._arm_actuator_ids = [
             mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_ACTUATOR, name) for name in self._arm_joint_names
         ]
-        self._arm_ros_joint_names = ["joint1", "joint2", "joint3", "joint4", "joint5"]
         self._arm_joint_ids = [
             mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_JOINT, name) for name in self._arm_joint_names
         ]
@@ -144,12 +143,12 @@ class AMEnv(MCEnv):
                 self._mj_data.ctrl[act_id] = control_sample.joint_positions[i]
 
     def _read_arm_joint_state(self) -> ArmStateSample:
-        """Return the current MuJoCo arm state for the five exported joints."""
+        """Return the current MuJoCo arm state for the exported arm and gripper joints."""
 
         positions: list[float] = []
         velocities: list[float] = []
         efforts: list[float] = []
-        for joint_id in self._arm_joint_ids[: len(self._arm_ros_joint_names)]:
+        for joint_id in self._arm_joint_ids:
             if joint_id < 0:
                 positions.append(0.0)
                 velocities.append(0.0)

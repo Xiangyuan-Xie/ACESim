@@ -9,6 +9,8 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 from acesim.utils.sim_streams import ArmStateCodec
 
+PX4_ARM_JOINT_COUNT = 5
+
 
 @dataclass(frozen=True)
 class DecodedArmState:
@@ -49,8 +51,8 @@ def build_sink(node: Any, bridge_config: BridgeConfig) -> Callable[[DecodedArmSt
     def publish(decoded: DecodedArmState) -> None:
         message = ArmJointState()
         message.timestamp = decoded.timestamp_us
-        message.arm_position = list(decoded.position)
-        message.arm_velocity = list(decoded.velocity)
+        message.arm_position = list(decoded.position[:PX4_ARM_JOINT_COUNT])
+        message.arm_velocity = list(decoded.velocity[:PX4_ARM_JOINT_COUNT])
         publisher.publish(message)
 
     return publish

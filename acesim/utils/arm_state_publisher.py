@@ -1,7 +1,7 @@
 """ZeroMQ publisher for the manipulator state exported by ``AMEnv``.
 
 The wire format is fixed: one timestamp in microseconds followed by the
-positions, velocities, and efforts of the 5 exported arm joints.
+positions, velocities, and efforts of the exported arm and gripper joints.
 """
 
 from __future__ import annotations
