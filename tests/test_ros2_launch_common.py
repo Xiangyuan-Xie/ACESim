@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import shlex
+import subprocess
 import sys
 import types
 import unittest
@@ -21,6 +24,7 @@ def _load_launch_common_module() -> ModuleType:
         "launch",
         "launch.actions",
         "launch.event_handlers",
+        "launch.events",
         "launch_ros",
         "launch_ros.actions",
         "rclpy",
@@ -35,6 +39,7 @@ def _load_launch_common_module() -> ModuleType:
     launch_module: Any = types.ModuleType("launch")
     launch_actions_module: Any = types.ModuleType("launch.actions")
     launch_event_handlers_module: Any = types.ModuleType("launch.event_handlers")
+    launch_events_module: Any = types.ModuleType("launch.events")
     launch_ros_module: Any = types.ModuleType("launch_ros")
     launch_ros_actions_module: Any = types.ModuleType("launch_ros.actions")
     ament_index_module: Any = types.ModuleType("ament_index_python")
@@ -63,6 +68,10 @@ def _load_launch_common_module() -> ModuleType:
             self.period = period
             self.actions = actions
 
+    class EmitEvent:
+        def __init__(self, *, event):
+            self.event = event
+
     class OnProcessStart:
         def __init__(self, *, target_action, on_start):
             self.target_action = target_action
@@ -81,6 +90,10 @@ def _load_launch_common_module() -> ModuleType:
             self.parameters = parameters or []
             self.output = output
             self.kwargs = kwargs
+
+    class Shutdown:
+        def __init__(self, *, reason=None):
+            self.reason = reason
 
     class QoSProfile:
         def __init__(self, **kwargs: object) -> None:
@@ -110,9 +123,11 @@ def _load_launch_common_module() -> ModuleType:
     def get_package_share_directory(_: str) -> str:
         return "/tmp/install/share/acesim_ros2"
 
+    launch_actions_module.EmitEvent = EmitEvent
     launch_actions_module.ExecuteProcess = ExecuteProcess
     launch_actions_module.RegisterEventHandler = RegisterEventHandler
     launch_actions_module.TimerAction = TimerAction
+    launch_events_module.Shutdown = Shutdown
     launch_event_handlers_module.OnProcessExit = OnProcessExit
     launch_event_handlers_module.OnProcessStart = OnProcessStart
     launch_ros_actions_module.Node = Node
@@ -128,6 +143,7 @@ def _load_launch_common_module() -> ModuleType:
 
     launch_module.actions = launch_actions_module
     launch_module.event_handlers = launch_event_handlers_module
+    launch_module.events = launch_events_module
     launch_ros_module.actions = launch_ros_actions_module
     ament_index_module.packages = ament_index_packages_module
 
@@ -136,6 +152,7 @@ def _load_launch_common_module() -> ModuleType:
     sys.modules["launch"] = launch_module
     sys.modules["launch.actions"] = launch_actions_module
     sys.modules["launch.event_handlers"] = launch_event_handlers_module
+    sys.modules["launch.events"] = launch_events_module
     sys.modules["launch_ros"] = launch_ros_module
     sys.modules["launch_ros.actions"] = launch_ros_actions_module
     sys.modules["rclpy"] = rclpy_module
@@ -180,6 +197,8 @@ class _FakeConfigLoader:
 
 class _FakePX4SensorParams:
     def __init__(self) -> None:
+        self.gps_home_lat_lon = (39.98329, 116.34745)
+        self.gps_alt_start = 50.0
         self.fusion_mode = "hil"
         self.ekf2_ev_ctrl = 0
         self.ekf2_hgt_ref = "GPS"
@@ -200,9 +219,50 @@ class _FakePX4SensorParams:
 class ROS2LaunchCommonTests(unittest.TestCase):
     launch_common: ClassVar[ModuleType]
 
+    def _play_action(self, entities: list[object], executable: str) -> Any:
+        for entity in entities:
+            if getattr(entity, "executable", None) == executable:
+                return entity
+            handler = getattr(entity, "event_handler", None)
+            actions = getattr(handler, "on_start", []) or []
+            for action in actions:
+                nested_actions = getattr(action, "actions", [action])
+                for nested in nested_actions:
+                    if getattr(nested, "executable", None) == executable:
+                        return nested
+        raise AssertionError(f"play action not found: {executable}")
+
+    def _play_process(self, entities: list[object], executable: str) -> Any:
+        needle = f"ros2 run acesim_ros2 {executable}"
+        for entity in entities:
+            if needle in " ".join(getattr(entity, "cmd", [])):
+                return entity
+            handler = getattr(entity, "event_handler", None)
+            actions = getattr(handler, "on_start", []) or []
+            for action in actions:
+                nested_actions = getattr(action, "actions", [action])
+                for nested in nested_actions:
+                    if needle in " ".join(getattr(nested, "cmd", [])):
+                        return nested
+        raise AssertionError(f"play process not found: {executable}")
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.launch_common = _load_launch_common_module()
+
+    def _bridge_process(self, entities: list[object]) -> Any:
+        return next(
+            entity
+            for entity in entities
+            if "ros2 run acesim_ros2 acesim_bridge" in " ".join(getattr(entity, "cmd", []))
+        )
+
+    def _bridge_overrides_file(self, entities: list[object]) -> Path:
+        bridge_process = self._bridge_process(entities)
+        for token in shlex.split(bridge_process.cmd[4]):
+            if token.startswith("bridge_overrides_file:="):
+                return Path(token.split(":=", 1)[1])
+        self.fail("bridge_overrides_file ros arg was not found")
 
     def test_resolve_px4_startup_env_supports_new_assets(self) -> None:
         cases = {
@@ -244,16 +304,20 @@ class ROS2LaunchCommonTests(unittest.TestCase):
             ):
                 self.launch_common.resolve_px4_startup_env()
 
-    def test_build_launch_entities_uses_single_bridge_node(self) -> None:
+    def test_build_launch_entities_uses_single_bridge_process(self) -> None:
         with patch.object(
             self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
         ):
             with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
                 entities = self.launch_common.build_launch_entities("/tmp/px4", enable_px4_post_start_setup=False)
 
-        bridge_nodes = [entity for entity in entities if getattr(entity, "executable", None) == "acesim_bridge"]
-        self.assertEqual(len(bridge_nodes), 1)
-        self.assertEqual(bridge_nodes[0].name, "acesim_bridge")
+        bridge_processes = [
+            entity
+            for entity in entities
+            if "ros2 run acesim_ros2 acesim_bridge" in " ".join(getattr(entity, "cmd", []))
+        ]
+        self.assertEqual(len(bridge_processes), 1)
+        self.assertIn("__node:=acesim_bridge", bridge_processes[0].cmd[4])
 
     def test_build_px4_additional_env_keeps_required_launch_overrides(self) -> None:
         with patch.object(self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("x500_arm2x")):
@@ -261,6 +325,11 @@ class ROS2LaunchCommonTests(unittest.TestCase):
                 additional_env = self.launch_common.build_px4_additional_env()
 
         self.assertEqual(additional_env["PX4_PARAM_COM_MODE_ARM_CHK"], "1")
+        self.assertEqual(additional_env["PX4_PARAM_SIM_BAT_ENABLE"], "1")
+        self.assertEqual(additional_env["PX4_PARAM_CBRK_SUPPLY_CHK"], "894281")
+        self.assertNotIn("PX4_PARAM_SENS_IMU_MODE", additional_env)
+        self.assertNotIn("PX4_PARAM_EKF2_MULTI_IMU", additional_env)
+        self.assertNotIn("PX4_PARAM_COM_ARM_WO_GPS", additional_env)
         self.assertNotIn("PX4_PARAM_AM_POS_MANL_CTRL", additional_env)
 
     def test_build_px4_additional_env_does_not_override_am_offboard_mode_in_mocap_mode(self) -> None:
@@ -277,6 +346,135 @@ class ROS2LaunchCommonTests(unittest.TestCase):
                 additional_env = self.launch_common.build_px4_additional_env()
 
         self.assertNotIn("PX4_PARAM_AMPC_OFFB_EN", additional_env)
+
+    def test_build_px4_additional_env_uses_configured_mag_type_for_mocap_mode(self) -> None:
+        mocap_params = _FakePX4SensorParams()
+        mocap_params.fusion_mode = "mocap"
+        mocap_params.ekf2_ev_ctrl = 11
+        mocap_params.ekf2_hgt_ref = "Vision"
+        mocap_params.ekf2_gps_ctrl = 0
+        mocap_params.ekf2_mag_type = 0
+
+        class _FakeMocapPX4SensorParams:
+            @classmethod
+            def from_asset_params(cls, asset_params: dict[str, object], dynamic_hil_sensor_fields: bool = False):
+                return mocap_params
+
+        with patch.object(self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("x500_arm2x")):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakeMocapPX4SensorParams):
+                additional_env = self.launch_common.build_px4_additional_env()
+
+        self.assertEqual(additional_env["PX4_PARAM_EKF2_EV_CTRL"], "11")
+        self.assertEqual(additional_env["PX4_PARAM_EKF2_MAG_TYPE"], "0")
+        self.assertEqual(additional_env["PX4_PARAM_SYS_HAS_MAG"], "0")
+
+    def test_build_px4_post_start_command_uses_module_entrypoint(self) -> None:
+        mocap_params = _FakePX4SensorParams()
+        mocap_params.fusion_mode = "mocap"
+
+        command = self.launch_common.build_px4_post_start_command(mocap_params)
+
+        self.assertEqual(command[:3], [sys.executable, "-m", "acesim_ros2.px4_post_start_setup"])
+        self.assertEqual(command[3:], ["mocap", "39.98329", "116.34745", "50.0"])
+
+    def test_build_px4_post_start_command_does_not_embed_shell_listener_polling(self) -> None:
+        mocap_params = _FakePX4SensorParams()
+        mocap_params.fusion_mode = "mocap"
+
+        command = self.launch_common.build_px4_post_start_command(mocap_params)
+        command_text = " ".join(command)
+
+        self.assertNotIn("-c", command)
+        self.assertNotIn("listener estimator_status", command_text)
+        self.assertNotIn("listener vehicle_local_position", command_text)
+        self.assertNotIn("listener vehicle_global_position", command_text)
+        self.assertNotIn("traceback.print_exc", command_text)
+
+    def test_build_px4_post_start_command_uses_zero_origin_for_hil_mode(self) -> None:
+        hil_params = _FakePX4SensorParams()
+        hil_params.fusion_mode = "hil"
+
+        command = self.launch_common.build_px4_post_start_command(hil_params)
+
+        self.assertEqual(command[3:], ["hil", "0.0", "0.0", "0.0"])
+
+    def test_graceful_shutdown_command_exits_zero_only_after_signal(self) -> None:
+        command = self.launch_common.build_graceful_shutdown_command("MicroXRCEAgent udp4 -p 8888")
+        script = command[2]
+
+        self.assertEqual(command[:2], ["bash", "-lc"])
+        self.assertEqual(command[4], "MicroXRCEAgent udp4 -p 8888")
+        self.assertIn("trap _forward_sigint INT", script)
+        self.assertIn("trap _forward_sigterm TERM", script)
+        self.assertIn("exit 0", script)
+        self.assertIn('exit "$_status"', script)
+
+    def test_graceful_shutdown_command_cleans_child_process_group(self) -> None:
+        command = self.launch_common.build_graceful_shutdown_command("make px4_sitl none")
+        script = command[2]
+
+        self.assertIn('setsid bash -lc "$1" &', script)
+        self.assertIn('kill -INT -- "-$_child_pid"', script)
+        self.assertIn('kill -TERM -- "-$_child_pid"', script)
+        self.assertIn('kill -KILL -- "-$_child_pid"', script)
+        self.assertIn('kill -0 -- "-$_child_pid"', script)
+        self.assertIn("_cleanup_after_signal", script)
+
+    def test_graceful_shutdown_command_can_filter_px4_prompt_spam(self) -> None:
+        command = self.launch_common.build_graceful_shutdown_command("make px4_sitl none", filter_px4_prompt=True)
+        script = command[2]
+
+        self.assertEqual(command[:2], ["bash", "-lc"])
+        self.assertEqual(command[4], "make px4_sitl none")
+        self.assertIn("mkfifo", script)
+        self.assertIn("pxh>", script)
+        self.assertIn("signal.SIG_IGN", script)
+        self.assertIn('> "$_filter_pipe" 2>&1', script)
+        self.assertIn('exit "$_status"', script)
+
+    def test_graceful_shutdown_command_filters_prompt_bytes_without_dropping_logs(self) -> None:
+        script = (
+            "import sys; "
+            "prompt = b'\\x1b[2K\\rpxh> '; "
+            "sys.stdout.buffer.write(prompt * 1000 + b'INFO real log\\n' + prompt + "
+            "b'WARN  [health_and_arming_checks] Preflight Fail: heading estimate not stable\\n' + "
+            "b'pxh> PX4 Exiting...\\n'); "
+            "sys.stdout.flush()"
+        )
+        command = self.launch_common.build_graceful_shutdown_command(
+            "python3 -c " + shlex.quote(script),
+            filter_px4_prompt=True,
+        )
+
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5, check=False)
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            result.stdout,
+            b"INFO real log\n"
+            b"WARN  [health_and_arming_checks] Preflight Fail: heading estimate not stable\n"
+            b"PX4 Exiting...\n",
+        )
+
+    def test_build_launch_entities_wraps_long_running_external_processes(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities("/tmp/px4", enable_px4_post_start_setup=False)
+
+        micro_agent = entities[0]
+        px4_process = next(entity for entity in entities if getattr(entity, "cwd", None) == "/tmp/px4")
+
+        self.assertEqual(micro_agent.cmd[:2], ["bash", "-lc"])
+        self.assertEqual(micro_agent.cmd[4], "MicroXRCEAgent udp4 -p 8888")
+        self.assertEqual(px4_process.cmd[:2], ["bash", "-lc"])
+        self.assertIn("setsid bash -lc", px4_process.cmd[2])
+        self.assertIn("kill -TERM --", px4_process.cmd[2])
+        self.assertIn("kill -KILL --", px4_process.cmd[2])
+        self.assertIn("pxh>", px4_process.cmd[2])
+        self.assertIn("make px4_sitl none", px4_process.cmd[4])
+        self.assertIn('exit "$_status"', px4_process.cmd[2])
 
     def test_load_bridge_entries_returns_all_configured_bridge_names(self) -> None:
         config_text = """
@@ -357,9 +555,8 @@ bridges:
                     enable_px4_post_start_setup=False,
                 )
 
-        bridge_node = next(entity for entity in entities if getattr(entity, "executable", None) == "acesim_bridge")
-        parameter_dict = next(item for item in bridge_node.parameters if isinstance(item, dict))
-        self.assertNotIn("bridge_config_file", parameter_dict)
+        bridge_process = self._bridge_process(entities)
+        self.assertNotIn("bridge_config_file", bridge_process.cmd[4])
 
     def test_bridge_config_path_prefers_share_directory(self) -> None:
         with patch.object(self.launch_common, "package_share_dir", return_value=Path("/tmp/install/share/acesim_ros2")):
@@ -384,9 +581,7 @@ bridges:
                     enable_px4_post_start_setup=False,
                 )
 
-        bridge_node = next(entity for entity in entities if getattr(entity, "executable", None) == "acesim_bridge")
-        parameter_dict = next(item for item in bridge_node.parameters if isinstance(item, dict))
-        override_path = Path(parameter_dict["bridge_overrides_file"])
+        override_path = self._bridge_overrides_file(entities)
         overrides = yaml.safe_load(override_path.read_text(encoding="utf-8"))
         self.assertEqual(
             overrides["overrides"],
@@ -408,9 +603,7 @@ bridges:
                         enable_px4_post_start_setup=False,
                     )
 
-        bridge_node = next(entity for entity in entities if getattr(entity, "executable", None) == "acesim_bridge")
-        parameter_dict = next(item for item in bridge_node.parameters if isinstance(item, dict))
-        override_path = Path(parameter_dict["bridge_overrides_file"])
+        override_path = self._bridge_overrides_file(entities)
         overrides = yaml.safe_load(override_path.read_text(encoding="utf-8"))
         self.assertEqual(
             overrides["overrides"],
@@ -420,15 +613,17 @@ bridges:
             },
         )
 
-    def test_build_launch_entities_passes_only_parameter_dict(self) -> None:
+    def test_build_launch_entities_passes_bridge_overrides_as_ros_arg(self) -> None:
         with patch.object(
             self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
         ):
             with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
                 entities = self.launch_common.build_launch_entities("/tmp/px4", enable_px4_post_start_setup=False)
 
-        bridge_node = next(entity for entity in entities if getattr(entity, "executable", None) == "acesim_bridge")
-        self.assertTrue(all(isinstance(item, dict) for item in bridge_node.parameters))
+        bridge_process = self._bridge_process(entities)
+        self.assertIn("--ros-args", bridge_process.cmd[4])
+        self.assertIn("-p", bridge_process.cmd[4])
+        self.assertIn("bridge_overrides_file:=", bridge_process.cmd[4])
 
     def test_build_launch_entities_injects_override_file_path(self) -> None:
         with patch.object(
@@ -437,21 +632,21 @@ bridges:
             with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
                 entities = self.launch_common.build_launch_entities("/tmp/px4", enable_px4_post_start_setup=False)
 
-        bridge_node = next(entity for entity in entities if getattr(entity, "executable", None) == "acesim_bridge")
-        parameter_dict = next(item for item in bridge_node.parameters if isinstance(item, dict))
-        self.assertIn("bridge_overrides_file", parameter_dict)
-        self.assertTrue(parameter_dict["bridge_overrides_file"].endswith(".yaml"))
+        override_path = self._bridge_overrides_file(entities)
+        self.assertTrue(str(override_path).endswith(".yaml"))
 
-    def test_build_launch_entities_sets_unbuffered_python_output_for_bridge_node(self) -> None:
+    def test_build_launch_entities_wraps_bridge_shutdown(self) -> None:
         with patch.object(
             self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
         ):
             with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
                 entities = self.launch_common.build_launch_entities("/tmp/px4", enable_px4_post_start_setup=False)
 
-        bridge_node = next(entity for entity in entities if getattr(entity, "executable", None) == "acesim_bridge")
-        self.assertTrue(bridge_node.kwargs["emulate_tty"])
-        self.assertEqual(bridge_node.kwargs["additional_env"]["PYTHONUNBUFFERED"], "1")
+        bridge_process = self._bridge_process(entities)
+        self.assertEqual(bridge_process.cmd[:2], ["bash", "-lc"])
+        self.assertIn('exit "$_status"', bridge_process.cmd[2])
+        self.assertTrue(bridge_process.kwargs["emulate_tty"])
+        self.assertIn("PYTHONUNBUFFERED=1", bridge_process.cmd[4])
 
     def test_build_launch_entities_sets_unbuffered_python_output_for_play_node(self) -> None:
         with patch.object(
@@ -460,11 +655,142 @@ bridges:
             with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
                 entities = self.launch_common.build_launch_entities("/tmp/px4")
 
-        register_handler = next(entity for entity in entities if getattr(entity, "event_handler", None) is not None)
-        play_node = register_handler.event_handler.on_start[0].actions[0]
+        play_node = self._play_action(entities, "acesim_play")
         self.assertEqual(play_node.executable, "acesim_play")
         self.assertTrue(play_node.kwargs["emulate_tty"])
         self.assertEqual(play_node.kwargs["additional_env"]["PYTHONUNBUFFERED"], "1")
+
+    def test_build_launch_entities_wraps_headless_play_shutdown(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities("/tmp/px4", play_executable="acesim_play_headless")
+
+        play_process = self._play_process(entities, "acesim_play_headless")
+
+        self.assertEqual(play_process.cmd[:2], ["bash", "-lc"])
+        self.assertIn("ros2 run acesim_ros2 acesim_play_headless", play_process.cmd[4])
+        self.assertIn('exit "$_status"', play_process.cmd[2])
+        self.assertIn("PYTHONUNBUFFERED=1", play_process.cmd[4])
+
+    def test_build_launch_entities_shutdowns_when_mujoco_frontend_exits(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities("/tmp/px4")
+
+        play_node = self._play_action(entities, "acesim_play")
+        exit_handler: Any = next(
+            entity
+            for entity in entities
+            if getattr(getattr(entity, "event_handler", None), "on_exit", None) is not None
+        )
+
+        self.assertIs(exit_handler.event_handler.target_action, play_node)
+        self.assertEqual(exit_handler.event_handler.on_exit[0].event.reason, "ACESim frontend exited")
+
+    def test_build_launch_entities_shutdowns_when_ue_frontend_exits(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities("/tmp/px4", play_executable="acesim_play_ue")
+
+        play_node = self._play_action(entities, "acesim_play_ue")
+        exit_handler: Any = next(
+            entity
+            for entity in entities
+            if getattr(getattr(entity, "event_handler", None), "on_exit", None) is not None
+        )
+
+        self.assertEqual(play_node.executable, "acesim_play_ue")
+        self.assertIs(exit_handler.event_handler.target_action, play_node)
+        self.assertEqual(exit_handler.event_handler.on_exit[0].event.reason, "ACESim frontend exited")
+
+    def test_build_launch_entities_starts_frontend_after_post_start_setup(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities("/tmp/px4")
+
+        post_start_process: Any = next(
+            entity for entity in entities if "acesim_ros2.px4_post_start_setup" in " ".join(getattr(entity, "cmd", []))
+        )
+        start_handler: Any = next(
+            entity
+            for entity in entities
+            if getattr(getattr(entity, "event_handler", None), "on_start", None) is not None
+            and entity.event_handler.target_action is post_start_process
+        )
+        timer = start_handler.event_handler.on_start[0]
+        play_node = timer.actions[0]
+
+        self.assertIn("acesim_ros2.px4_post_start_setup", post_start_process.cmd)
+        self.assertEqual(post_start_process.output, "both")
+        self.assertEqual(post_start_process.additional_env["ACESIM_PX4_VERIFY_ARMABLE"], "1")
+        self.assertEqual(play_node.executable, "acesim_play")
+        self.assertEqual(timer.period, 2.0)
+
+    def test_build_launch_entities_starts_ue_frontend_after_post_start_setup_with_longer_delay(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities("/tmp/px4", play_executable="acesim_play_ue")
+
+        post_start_process: Any = next(
+            entity for entity in entities if "acesim_ros2.px4_post_start_setup" in " ".join(getattr(entity, "cmd", []))
+        )
+        start_handler: Any = next(
+            entity
+            for entity in entities
+            if getattr(getattr(entity, "event_handler", None), "on_start", None) is not None
+            and entity.event_handler.target_action is post_start_process
+        )
+        timer = start_handler.event_handler.on_start[0]
+        play_node = timer.actions[0]
+
+        self.assertEqual(play_node.executable, "acesim_play_ue")
+        self.assertEqual(timer.period, 8.0)
+        self.assertEqual(post_start_process.additional_env["ACESIM_PX4_VERIFY_ARMABLE"], "1")
+        self.assertEqual(post_start_process.additional_env["ACESIM_PX4_READY_CONTEXT"], "UE mode")
+
+    def test_build_launch_entities_does_not_add_frontend_shutdown_without_play_node(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities(
+                    "/tmp/px4",
+                    play_executable=None,
+                    enable_px4_post_start_setup=False,
+                )
+
+        exit_handlers = [
+            entity
+            for entity in entities
+            if getattr(getattr(entity, "event_handler", None), "on_exit", None) is not None
+        ]
+        self.assertEqual(exit_handlers, [])
+
+    def test_build_launch_entities_merges_additional_play_env(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities(
+                    "/tmp/px4",
+                    play_executable="acesim_play_ue",
+                    additional_play_env={"ACESIM_UE_EXECUTABLE": "/tmp/ACESimUE"},
+                )
+
+        play_node = self._play_action(entities, "acesim_play_ue")
+        self.assertEqual(play_node.executable, "acesim_play_ue")
+        self.assertEqual(play_node.kwargs["additional_env"]["PYTHONUNBUFFERED"], "1")
+        self.assertEqual(play_node.kwargs["additional_env"]["ACESIM_UE_EXECUTABLE"], "/tmp/ACESimUE")
 
     def test_build_px4_post_start_setup_process_sets_unbuffered_python_output(self) -> None:
         with patch.object(
@@ -474,7 +800,36 @@ bridges:
                 process = self.launch_common.build_px4_post_start_setup_process()
 
         self.assertTrue(process.kwargs["emulate_tty"])
+        self.assertEqual(process.output, "both")
         self.assertEqual(process.additional_env["PYTHONUNBUFFERED"], "1")
+        self.assertNotIn("ACESIM_PX4_VERIFY_ARMABLE", process.additional_env)
+
+    def test_build_launch_entities_enables_default_post_start_armability_verification(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities("/tmp/px4")
+
+        post_start_process = next(
+            entity for entity in entities if "acesim_ros2.px4_post_start_setup" in " ".join(getattr(entity, "cmd", []))
+        )
+
+        self.assertEqual(post_start_process.additional_env["ACESIM_PX4_VERIFY_ARMABLE"], "1")
+
+    def test_build_launch_entities_preserves_post_start_armability_opt_out(self) -> None:
+        with patch.dict(os.environ, {"ACESIM_PX4_VERIFY_ARMABLE": "0"}):
+            with patch.object(
+                self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+            ):
+                with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                    entities = self.launch_common.build_launch_entities("/tmp/px4")
+
+        post_start_process = next(
+            entity for entity in entities if "acesim_ros2.px4_post_start_setup" in " ".join(getattr(entity, "cmd", []))
+        )
+
+        self.assertEqual(post_start_process.additional_env["ACESIM_PX4_VERIFY_ARMABLE"], "0")
 
     def test_launch_common_uses_non_private_helper_names(self) -> None:
         self.assertTrue(hasattr(self.launch_common, "resolve_px4_startup_env"))

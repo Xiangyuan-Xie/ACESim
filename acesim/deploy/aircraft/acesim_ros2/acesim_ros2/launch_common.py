@@ -6,7 +6,6 @@ import re
 import shlex
 import sys
 import tempfile
-import textwrap
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -18,8 +17,9 @@ if __package__ in (None, ""):
 import yaml
 from acesim_ros2.bridge.registry import PLUGIN_REGISTRY
 from ament_index_python.packages import get_package_share_directory
-from launch.actions import ExecuteProcess, RegisterEventHandler, TimerAction
-from launch.event_handlers import OnProcessStart
+from launch.actions import EmitEvent, ExecuteProcess, RegisterEventHandler, TimerAction
+from launch.event_handlers import OnProcessExit, OnProcessStart
+from launch.events import Shutdown
 from launch_ros.actions import Node
 
 from acesim.config.config_loader import ConfigLoader
@@ -110,11 +110,18 @@ def build_px4_additional_env() -> dict[str, str]:
         dynamic_hil_sensor_fields=False,
     )
     additional_env = resolve_px4_startup_env()
+
     additional_env.update(
         {
             # Keep external modes registered and checked while armed so the
             # internally hosted RL mode remains selectable after takeoff.
             "PX4_PARAM_COM_MODE_ARM_CHK": "1",
+            # ACESim SITL has no real power module. PX4's HIL/SIH airframes use
+            # this same circuit breaker, and keeping the battery simulator on
+            # prevents QGC from seeing a missing/invalid battery source during
+            # UE startup.
+            "PX4_PARAM_CBRK_SUPPLY_CHK": "894281",
+            "PX4_PARAM_SIM_BAT_ENABLE": "1",
         }
     )
     if sensor_params.fusion_mode == "hil":
@@ -167,6 +174,90 @@ def build_px4_make_command(additional_env: dict[str, str]) -> str:
 
     exports = " ".join(f"{name}={shlex.quote(value)}" for name, value in sorted(additional_env.items()))
     return f"env {exports} make px4_sitl none"
+
+
+def build_graceful_shutdown_command(command: str, *, filter_px4_prompt: bool = False) -> list[str]:
+    output_filter_setup = ""
+    child_output_redirect = ""
+    output_filter_cleanup = ""
+    if filter_px4_prompt:
+        filter_script = (
+            "import os, re, signal\n"
+            "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "ansi_pattern = re.compile(rb'\\x1b\\[[0-9;?]*[ -/]*[@-~]')\n"
+            "prompt_pattern = re.compile(rb'pxh>\\s?')\n"
+            "buffer = b''\n"
+            "def clean(chunk):\n"
+            "    chunk = ansi_pattern.sub(b'', chunk)\n"
+            "    chunk = chunk.replace(b'\\r', b'')\n"
+            "    return prompt_pattern.sub(b'', chunk)\n"
+            "while True:\n"
+            "    data = os.read(0, 4096)\n"
+            "    if not data:\n"
+            "        break\n"
+            "    buffer += data\n"
+            "    lines = buffer.split(b'\\n')\n"
+            "    for line in lines[:-1]:\n"
+            "        line = clean(line + b'\\n')\n"
+            "        if line.strip():\n"
+            "            os.write(1, line)\n"
+            "    buffer = lines[-1]\n"
+            "    if len(buffer) > 65536:\n"
+            "        buffer = clean(buffer)\n"
+            "        if buffer.strip():\n"
+            "            os.write(1, buffer)\n"
+            "        buffer = b''\n"
+            "buffer = clean(buffer)\n"
+            "if buffer.strip():\n"
+            "    os.write(1, buffer)\n"
+        )
+        output_filter_setup = (
+            "_filter_dir=$(mktemp -d)\n"
+            '_filter_pipe="$_filter_dir/px4-output"\n'
+            'mkfifo "$_filter_pipe"\n'
+            f'python3 -c {shlex.quote(filter_script)} < "$_filter_pipe" &\n'
+            "_filter_pid=$!\n"
+        )
+        child_output_redirect = ' > "$_filter_pipe" 2>&1'
+        output_filter_cleanup = (
+            'wait "$_filter_pid" 2>/dev/null || true\n' 'rm -rf "$_filter_dir" 2>/dev/null || true\n'
+        )
+    script = (
+        "_signal_received=0\n"
+        f"{output_filter_setup}"
+        "_cleanup_after_signal() {\n"
+        "  _signal_received=1\n"
+        "  _sig=$1\n"
+        '  if [ "$_sig" = INT ]; then\n'
+        '    kill -INT -- "-$_child_pid" 2>/dev/null || true\n'
+        "  else\n"
+        '    kill -TERM -- "-$_child_pid" 2>/dev/null || true\n'
+        "  fi\n"
+        "  for _ in 1 2 3 4 5; do\n"
+        '    kill -0 -- "-$_child_pid" 2>/dev/null || return 0\n'
+        "    sleep 0.2\n"
+        "  done\n"
+        '  kill -TERM -- "-$_child_pid" 2>/dev/null || true\n'
+        "  for _ in 1 2 3 4 5; do\n"
+        '    kill -0 -- "-$_child_pid" 2>/dev/null || return 0\n'
+        "    sleep 0.2\n"
+        "  done\n"
+        '  kill -KILL -- "-$_child_pid" 2>/dev/null || true\n'
+        "}\n"
+        "_forward_sigint() { _cleanup_after_signal INT; }\n"
+        "_forward_sigterm() { _cleanup_after_signal TERM; }\n"
+        "trap _forward_sigint INT\n"
+        "trap _forward_sigterm TERM\n"
+        f'setsid bash -lc "$1"{child_output_redirect} &\n'
+        "_child_pid=$!\n"
+        'wait "$_child_pid"\n'
+        "_status=$?\n"
+        f"{output_filter_cleanup}"
+        'if [ "$_signal_received" -eq 1 ]; then wait "$_child_pid" 2>/dev/null || true; exit 0; fi\n'
+        'exit "$_status"'
+    )
+    return ["bash", "-lc", script, "_", command]
 
 
 def package_share_dir() -> Path | None:
@@ -260,94 +351,10 @@ def build_px4_post_start_command(sensor_params: PX4SensorParams) -> list[str]:
         gps_home_lon = float(sensor_params.gps_home_lat_lon[1])
         gps_alt_start = float(sensor_params.gps_alt_start)
 
-    script = textwrap.dedent("""
-        import sys
-        import time
-        from pymavlink import mavutil
-
-        fusion_mode = sys.argv[1]
-        gps_home_lat = float(sys.argv[2])
-        gps_home_lon = float(sys.argv[3])
-        gps_alt_start = float(sys.argv[4])
-
-        mav = mavutil.mavlink_connection(
-            "udpout:127.0.0.1:14580",
-            source_system=250,
-            source_component=190,
-            autoreconnect=True,
-        )
-
-        deadline = time.monotonic() + 60.0
-        while time.monotonic() < deadline:
-            mav.mav.heartbeat_send(
-                mavutil.mavlink.MAV_TYPE_GENERIC,
-                mavutil.mavlink.MAV_AUTOPILOT_INVALID,
-                0,
-                0,
-                0,
-            )
-            if mav.recv_match(type="HEARTBEAT", blocking=True, timeout=1.0) is not None:
-                break
-        else:
-            raise RuntimeError("Failed to connect to PX4 MAVLink shell on udpout:127.0.0.1:14580")
-
-        def run_shell(command: str, expect: str | None = None, retries: int = 8) -> None:
-            payload = command.strip() + "\\n"
-            last_output = ""
-            for _ in range(retries):
-                drain_deadline = time.monotonic() + 0.2
-                while time.monotonic() < drain_deadline:
-                    reply = mav.recv_match(type="SERIAL_CONTROL", blocking=True, timeout=0.05)
-                    if reply is None:
-                        continue
-
-                remaining = payload
-                while remaining:
-                    chunk = remaining[:70]
-                    remaining = remaining[70:]
-                    data = [ord(char) for char in chunk]
-                    data.extend([0] * (70 - len(data)))
-                    mav.mav.serial_control_send(
-                        mavutil.mavlink.SERIAL_CONTROL_DEV_SHELL,
-                        mavutil.mavlink.SERIAL_CONTROL_FLAG_EXCLUSIVE | mavutil.mavlink.SERIAL_CONTROL_FLAG_RESPOND,
-                        0,
-                        0,
-                        len(chunk),
-                        data,
-                    )
-                    time.sleep(0.05)
-
-                chunks = []
-                output_deadline = time.monotonic() + 1.0
-                while time.monotonic() < output_deadline:
-                    reply = mav.recv_match(type="SERIAL_CONTROL", blocking=True, timeout=0.2)
-                    if reply is None or int(getattr(reply, "count", 0)) <= 0:
-                        continue
-                    chunks.append(bytes(reply.data[: reply.count]).decode("utf-8", errors="ignore"))
-
-                last_output = "".join(chunks)
-                lowered = last_output.lower()
-                if "error" in lowered or "not found" in lowered or "nack" in lowered or "failed" in lowered:
-                    time.sleep(0.3)
-                    continue
-                if expect is None or expect.lower() in lowered:
-                    return
-                time.sleep(0.3)
-
-            raise RuntimeError(f"PX4 shell command failed: {command}\\nOutput:\\n{last_output.strip()}")
-
-        try:
-            run_shell("ver all")
-            if fusion_mode == "mocap":
-                run_shell(f"commander set_ekf_origin {gps_home_lat} {gps_home_lon} {gps_alt_start}")
-                run_shell("listener vehicle_global_position 1", expect="lat")
-        finally:
-            mav.mav.serial_control_send(mavutil.mavlink.SERIAL_CONTROL_DEV_SHELL, 0, 0, 0, 0, [0] * 70)
-        """).strip()
     return [
         sys.executable,
-        "-c",
-        script,
+        "-m",
+        "acesim_ros2.px4_post_start_setup",
         sensor_params.fusion_mode,
         str(gps_home_lat),
         str(gps_home_lon),
@@ -360,20 +367,55 @@ def python_launch_kwargs(*, additional_env: Optional[dict[str, str]] = None) -> 
     if additional_env:
         merged_env.update(additional_env)
     return {
-        "output": "screen",
+        "output": "both",
         "emulate_tty": True,
         "additional_env": merged_env,
     }
 
 
-def build_px4_post_start_setup_process() -> ExecuteProcess:
+def build_python_module_run_command(
+    package: str,
+    executable: str,
+    additional_env: Optional[dict[str, str]] = None,
+    extra_args: Optional[list[str]] = None,
+) -> str:
+    env = {"PYTHONUNBUFFERED": "1"}
+    if additional_env:
+        env.update(additional_env)
+    exports = " ".join(f"{name}={shlex.quote(value)}" for name, value in sorted(env.items()))
+    args = " ".join(shlex.quote(arg) for arg in (extra_args or []))
+    suffix = f" {args}" if args else ""
+    return f"env {exports} ros2 run {shlex.quote(package)} {shlex.quote(executable)}{suffix}"
+
+
+def build_px4_post_start_setup_process(additional_env: Optional[dict[str, str]] = None) -> ExecuteProcess:
     sensor_params = PX4SensorParams.from_asset_params(
         ConfigLoader().get_asset_params(),
         dynamic_hil_sensor_fields=False,
     )
     return ExecuteProcess(
         cmd=build_px4_post_start_command(sensor_params),
-        **python_launch_kwargs(),
+        **python_launch_kwargs(additional_env=additional_env),
+    )
+
+
+def build_play_action(play_executable: str, additional_play_env: Optional[dict[str, str]] = None):
+    if play_executable == "acesim_play_headless":
+        return ExecuteProcess(
+            cmd=build_graceful_shutdown_command(
+                build_python_module_run_command(
+                    "acesim_ros2",
+                    play_executable,
+                    additional_play_env,
+                )
+            ),
+            output="screen",
+            emulate_tty=True,
+        )
+    return Node(
+        package="acesim_ros2",
+        executable=play_executable,
+        **python_launch_kwargs(additional_env=additional_play_env),
     )
 
 
@@ -382,6 +424,7 @@ def build_launch_entities(
     *,
     bridge_mode: Literal["linux", "wsl"] = "linux",
     play_executable: Optional[str] = "acesim_play",
+    additional_play_env: Optional[dict[str, str]] = None,
     enable_px4_post_start_setup: bool = True,
     play_start_delay_sec: float = 2.0,
 ):
@@ -412,42 +455,60 @@ def build_launch_entities(
     finally:
         handle.close()
     entities = [
-        ExecuteProcess(cmd=["MicroXRCEAgent", "udp4", "-p", "8888"], output="screen"),
+        ExecuteProcess(cmd=build_graceful_shutdown_command("MicroXRCEAgent udp4 -p 8888"), output="screen"),
         ExecuteProcess(
-            cmd=["bash", "-lc", build_px4_make_command(px4_additional_env)],
+            cmd=build_graceful_shutdown_command(build_px4_make_command(px4_additional_env), filter_px4_prompt=True),
             cwd=px4_repo_path,
             additional_env=px4_additional_env,
             output="screen",
         ),
-        Node(
-            package="acesim_ros2",
-            executable="acesim_bridge",
-            name="acesim_bridge",
-            parameters=[
-                {
-                    "bridge_overrides_file": overrides_file,
-                },
-            ],
-            **python_launch_kwargs(),
+        ExecuteProcess(
+            cmd=build_graceful_shutdown_command(
+                build_python_module_run_command(
+                    "acesim_ros2",
+                    "acesim_bridge",
+                    extra_args=[
+                        "--ros-args",
+                        "-r",
+                        "__node:=acesim_bridge",
+                        "-p",
+                        f"bridge_overrides_file:={overrides_file}",
+                    ],
+                )
+            ),
+            output="screen",
+            emulate_tty=True,
         ),
     ]
 
+    acesim_play = build_play_action(play_executable, additional_play_env) if play_executable else None
+    if play_executable == "acesim_play_ue" and play_start_delay_sec == 2.0:
+        play_start_delay_sec = 8.0
     px4_post_start_setup = None
     if enable_px4_post_start_setup:
-        px4_post_start_setup = build_px4_post_start_setup_process()
+        post_start_env = {"ACESIM_PX4_VERIFY_ARMABLE": os.environ.get("ACESIM_PX4_VERIFY_ARMABLE", "1")}
+        if play_executable == "acesim_play_ue":
+            post_start_env["ACESIM_PX4_READY_CONTEXT"] = "UE mode"
+        px4_post_start_setup = build_px4_post_start_setup_process(post_start_env)
         entities.append(px4_post_start_setup)
 
-    if enable_px4_post_start_setup and play_executable:
-        acesim_play = Node(
-            package="acesim_ros2",
-            executable=play_executable,
-            **python_launch_kwargs(),
-        )
+    if acesim_play is not None:
+        if px4_post_start_setup is None:
+            entities.append(acesim_play)
+        else:
+            entities.append(
+                RegisterEventHandler(
+                    OnProcessStart(
+                        target_action=px4_post_start_setup,
+                        on_start=[TimerAction(period=play_start_delay_sec, actions=[acesim_play])],
+                    )
+                )
+            )
         entities.append(
             RegisterEventHandler(
-                OnProcessStart(
-                    target_action=px4_post_start_setup,
-                    on_start=[TimerAction(period=play_start_delay_sec, actions=[acesim_play])],
+                OnProcessExit(
+                    target_action=acesim_play,
+                    on_exit=[EmitEvent(event=Shutdown(reason="ACESim frontend exited"))],
                 )
             )
         )

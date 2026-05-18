@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import signal
 from pathlib import Path
 
 import rclpy
@@ -8,6 +9,10 @@ from acesim_ros2.bridge.registry import PLUGIN_REGISTRY
 from acesim_ros2.bridge.runtime import BridgeHost
 from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from rclpy.node import Node
+
+
+class ShutdownRequested(Exception):
+    """Raised by the SIGTERM handler so launch shutdown exits quietly."""
 
 
 def default_bridge_config_path() -> str:
@@ -38,18 +43,53 @@ class AcesimBridgeNode(Node):
         return super().destroy_node()
 
 
-def main(args: list[str] | None = None) -> None:
-    rclpy.init(args=args)
-    node = AcesimBridgeNode()
+def _request_shutdown(_signum: int, _frame: object) -> None:
+    raise ShutdownRequested()
+
+
+def _is_ros_external_shutdown(exc: BaseException) -> bool:
+    return exc.__class__.__name__ == "ExternalShutdownException" and exc.__class__.__module__.startswith("rclpy")
+
+
+def _is_ros_context_shutdown_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return (
+        exc.__class__.__name__ == "RCLError"
+        and exc.__class__.__module__.startswith("rclpy")
+        and ("context is invalid" in message or "context is not valid" in message)
+        and not rclpy.ok()
+    )
+
+
+def main(args: list[str] | None = None) -> int:
+    signal.signal(signal.SIGTERM, _request_shutdown)
+    node: AcesimBridgeNode | None = None
+    shutdown_requested = False
     try:
+        rclpy.init(args=args)
+        node = AcesimBridgeNode()
         rclpy.spin(node)
-    except KeyboardInterrupt:
-        return
+    except (KeyboardInterrupt, ShutdownRequested):
+        shutdown_requested = True
+    except Exception as exc:
+        if not (_is_ros_external_shutdown(exc) or _is_ros_context_shutdown_error(exc)):
+            raise
+        shutdown_requested = True
     finally:
-        node.destroy_node()
+        if node is not None:
+            try:
+                node.destroy_node()
+            except (KeyboardInterrupt, ShutdownRequested):
+                shutdown_requested = True
         if rclpy.ok():
-            rclpy.shutdown()
+            try:
+                rclpy.shutdown()
+            except (KeyboardInterrupt, ShutdownRequested):
+                shutdown_requested = True
+    if shutdown_requested:
+        return 0
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

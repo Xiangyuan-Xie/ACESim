@@ -655,7 +655,163 @@ class AcesimBridgeTests(unittest.TestCase):
             patch.object(self.acesim_bridge.rclpy, "ok", side_effect=lambda: True),
             patch.object(self.acesim_bridge.rclpy, "shutdown", side_effect=lambda: calls.append("shutdown")),
         ):
-            self.acesim_bridge.main(["--test"])
+            exit_code = self.acesim_bridge.main(["--test"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, ["init", "destroy_node", "shutdown"])
+
+    def test_main_returns_zero_if_shutdown_interrupts_destroy_node(self) -> None:
+        calls: list[str] = []
+
+        class FakeBridgeNode:
+            def destroy_node(self) -> None:
+                calls.append("destroy_node")
+                raise KeyboardInterrupt
+
+        fake_node = FakeBridgeNode()
+
+        with (
+            patch.object(self.acesim_bridge.rclpy, "init", side_effect=lambda args=None: calls.append("init")),
+            patch.object(self.acesim_bridge, "AcesimBridgeNode", side_effect=lambda: fake_node),
+            patch.object(self.acesim_bridge.rclpy, "spin", side_effect=KeyboardInterrupt),
+            patch.object(self.acesim_bridge.rclpy, "ok", side_effect=lambda: True),
+            patch.object(self.acesim_bridge.rclpy, "shutdown", side_effect=lambda: calls.append("shutdown")),
+        ):
+            exit_code = self.acesim_bridge.main(["--test"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, ["init", "destroy_node", "shutdown"])
+
+    def test_main_returns_zero_for_sigterm_shutdown_request(self) -> None:
+        calls: list[str] = []
+
+        class FakeBridgeNode:
+            def destroy_node(self) -> None:
+                calls.append("destroy_node")
+
+        fake_node = FakeBridgeNode()
+
+        with (
+            patch.object(self.acesim_bridge.rclpy, "init", side_effect=lambda args=None: calls.append("init")),
+            patch.object(self.acesim_bridge, "AcesimBridgeNode", side_effect=lambda: fake_node),
+            patch.object(self.acesim_bridge.rclpy, "spin", side_effect=self.acesim_bridge.ShutdownRequested),
+            patch.object(self.acesim_bridge.rclpy, "ok", side_effect=lambda: True),
+            patch.object(self.acesim_bridge.rclpy, "shutdown", side_effect=lambda: calls.append("shutdown")),
+        ):
+            exit_code = self.acesim_bridge.main(["--test"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, ["init", "destroy_node", "shutdown"])
+
+    def test_main_returns_zero_for_ros_external_shutdown(self) -> None:
+        calls: list[str] = []
+
+        class FakeBridgeNode:
+            def destroy_node(self) -> None:
+                calls.append("destroy_node")
+
+        class ExternalShutdownException(Exception):
+            pass
+
+        ExternalShutdownException.__module__ = "rclpy.executors"
+        fake_node = FakeBridgeNode()
+
+        with (
+            patch.object(self.acesim_bridge.rclpy, "init", side_effect=lambda args=None: calls.append("init")),
+            patch.object(self.acesim_bridge, "AcesimBridgeNode", side_effect=lambda: fake_node),
+            patch.object(self.acesim_bridge.rclpy, "spin", side_effect=ExternalShutdownException),
+            patch.object(self.acesim_bridge.rclpy, "ok", side_effect=lambda: True),
+            patch.object(self.acesim_bridge.rclpy, "shutdown", side_effect=lambda: calls.append("shutdown")),
+        ):
+            exit_code = self.acesim_bridge.main(["--test"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, ["init", "destroy_node", "shutdown"])
+
+    def test_main_returns_zero_for_ros_context_invalid_during_shutdown(self) -> None:
+        calls: list[str] = []
+
+        class FakeBridgeNode:
+            def destroy_node(self) -> None:
+                calls.append("destroy_node")
+
+        class RCLError(Exception):
+            pass
+
+        RCLError.__module__ = "rclpy._rclpy_pybind11"
+        fake_node = FakeBridgeNode()
+
+        with (
+            patch.object(self.acesim_bridge.rclpy, "init", side_effect=lambda args=None: calls.append("init")),
+            patch.object(self.acesim_bridge, "AcesimBridgeNode", side_effect=lambda: fake_node),
+            patch.object(
+                self.acesim_bridge.rclpy,
+                "spin",
+                side_effect=RCLError("Failed to publish: publisher's context is invalid"),
+            ),
+            patch.object(self.acesim_bridge.rclpy, "ok", side_effect=[False, False]),
+            patch.object(self.acesim_bridge.rclpy, "shutdown", side_effect=lambda: calls.append("shutdown")),
+        ):
+            exit_code = self.acesim_bridge.main(["--test"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, ["init", "destroy_node"])
+
+    def test_main_returns_zero_for_ros_context_not_valid_during_shutdown(self) -> None:
+        calls: list[str] = []
+
+        class FakeBridgeNode:
+            def destroy_node(self) -> None:
+                calls.append("destroy_node")
+
+        class RCLError(Exception):
+            pass
+
+        RCLError.__module__ = "rclpy._rclpy_pybind11"
+        fake_node = FakeBridgeNode()
+
+        with (
+            patch.object(self.acesim_bridge.rclpy, "init", side_effect=lambda args=None: calls.append("init")),
+            patch.object(self.acesim_bridge, "AcesimBridgeNode", side_effect=lambda: fake_node),
+            patch.object(
+                self.acesim_bridge.rclpy,
+                "spin",
+                side_effect=RCLError("failed to initialize wait set: the given context is not valid"),
+            ),
+            patch.object(self.acesim_bridge.rclpy, "ok", side_effect=[False, False]),
+            patch.object(self.acesim_bridge.rclpy, "shutdown", side_effect=lambda: calls.append("shutdown")),
+        ):
+            exit_code = self.acesim_bridge.main(["--test"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, ["init", "destroy_node"])
+
+    def test_main_propagates_ros_context_errors_while_context_is_ok(self) -> None:
+        calls: list[str] = []
+
+        class FakeBridgeNode:
+            def destroy_node(self) -> None:
+                calls.append("destroy_node")
+
+        class RCLError(Exception):
+            pass
+
+        RCLError.__module__ = "rclpy._rclpy_pybind11"
+        fake_node = FakeBridgeNode()
+
+        with (
+            patch.object(self.acesim_bridge.rclpy, "init", side_effect=lambda args=None: calls.append("init")),
+            patch.object(self.acesim_bridge, "AcesimBridgeNode", side_effect=lambda: fake_node),
+            patch.object(
+                self.acesim_bridge.rclpy,
+                "spin",
+                side_effect=RCLError("Failed to publish: publisher's context is invalid"),
+            ),
+            patch.object(self.acesim_bridge.rclpy, "ok", side_effect=lambda: True),
+            patch.object(self.acesim_bridge.rclpy, "shutdown", side_effect=lambda: calls.append("shutdown")),
+        ):
+            with self.assertRaisesRegex(RCLError, "context is invalid"):
+                self.acesim_bridge.main(["--test"])
 
         self.assertEqual(calls, ["init", "destroy_node", "shutdown"])
 
