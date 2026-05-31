@@ -332,6 +332,14 @@ class ROS2LaunchCommonTests(unittest.TestCase):
         self.assertNotIn("PX4_PARAM_COM_ARM_WO_GPS", additional_env)
         self.assertNotIn("PX4_PARAM_AM_POS_MANL_CTRL", additional_env)
 
+    def test_build_px4_additional_env_can_use_explicit_config_loader(self) -> None:
+        with patch.object(self.launch_common, "ConfigLoader", side_effect=AssertionError("unexpected default config")):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                additional_env = self.launch_common.build_px4_additional_env(_FakeConfigLoader("x500_arm2x"))
+
+        self.assertEqual(additional_env["PX4_SYS_AUTOSTART"], "10016")
+        self.assertEqual(additional_env["PX4_PARAM_COM_MODE_ARM_CHK"], "1")
+
     def test_build_px4_additional_env_does_not_override_am_offboard_mode_in_mocap_mode(self) -> None:
         mocap_params = _FakePX4SensorParams()
         mocap_params.fusion_mode = "mocap"

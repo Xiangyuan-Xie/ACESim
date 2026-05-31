@@ -71,7 +71,6 @@ def _load_acesim_bridge_module() -> ModuleType:
         def __init__(self) -> None:
             self.timestamp = 0
             self.arm_position: list[float] = []
-            self.arm_velocity: list[float] = []
 
     class PackageNotFoundError(Exception):
         pass
@@ -566,7 +565,7 @@ class AcesimBridgeTests(unittest.TestCase):
         message = publisher.messages[0]
         self.assertEqual(message.timestamp, 123456)
         self.assertEqual(message.arm_position, [0.1, 0.2, 0.3, 0.4, 0.5])
-        self.assertEqual(message.arm_velocity, [1.1, 1.2, 1.3, 1.4, 1.5])
+        self.assertFalse(hasattr(message, "arm_velocity"))
 
     def test_compiled_bridge_runtime_decode_failure_raises(self) -> None:
         node = self._make_bridge_node("""

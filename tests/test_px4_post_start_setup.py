@@ -501,7 +501,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
                     with patch.object(
                         self.module,
                         "wait_for_estimator_ready",
-                        side_effect=lambda _mav, _lat, _lon: calls.append("wait_ready"),
+                        side_effect=lambda _mav, _lat, _lon, **_kwargs: calls.append("wait_ready"),
                     ):
                         with patch.object(
                             self.module, "verify_armable", side_effect=lambda _mav: calls.append("verify_armable")
@@ -533,7 +533,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
                     with patch.object(
                         self.module,
                         "wait_for_estimator_ready",
-                        side_effect=lambda _mav, _lat, _lon: calls.append("wait_ready"),
+                        side_effect=lambda _mav, _lat, _lon, **_kwargs: calls.append("wait_ready"),
                     ):
                         with patch.object(
                             self.module, "verify_armable", side_effect=lambda _mav: calls.append("verify_armable")
@@ -569,7 +569,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
                     with patch.object(
                         self.module,
                         "wait_for_estimator_ready",
-                        side_effect=lambda _mav, _lat, _lon: calls.append("wait_ready"),
+                        side_effect=lambda _mav, _lat, _lon, **_kwargs: calls.append("wait_ready"),
                     ):
                         with patch.object(self.module, "verify_armable", side_effect=verify_once_then_succeed):
                             with patch.dict(os.environ, {}, clear=True):
@@ -582,6 +582,54 @@ class PX4PostStartSetupTests(unittest.TestCase):
                 "send_origin",
                 "wait_ready",
                 "verify_armable",
+                "wait_ready",
+                "verify_armable",
+            ],
+        )
+
+    def test_mocap_post_start_retries_transient_readiness_timeouts(self) -> None:
+        calls: list[str] = []
+        mav = object()
+
+        def readiness_once_then_succeed(_mav: object, _lat: float, _lon: float, **_kwargs: object) -> None:
+            calls.append("wait_ready")
+            if calls.count("wait_ready") == 1:
+                raise RuntimeError("PX4 estimator did not become ready for arming before timeout")
+
+        with patch.object(self.module, "ARMABILITY_TOTAL_TIMEOUT_SEC", 2.0):
+            with patch.object(self.module, "ARMABILITY_RETRY_DELAY_SEC", 0.0):
+                with patch.object(self.module, "time") as time_mock:
+                    now = [100.0]
+                    time_mock.monotonic.side_effect = lambda: now.__setitem__(0, now[0] + 0.1) or now[0]
+                    time_mock.sleep.side_effect = lambda _delay: None
+                    with patch.object(self.module.mavutil, "mavlink_connection", return_value=mav):
+                        with patch.object(
+                            self.module, "wait_for_mavlink", side_effect=lambda _mav: calls.append("wait_mavlink")
+                        ):
+                            with patch.object(
+                                self.module,
+                                "send_ekf_origin",
+                                side_effect=lambda _mav, _lat, _lon, _alt: calls.append("send_origin"),
+                            ):
+                                with patch.object(
+                                    self.module,
+                                    "wait_for_estimator_ready",
+                                    side_effect=readiness_once_then_succeed,
+                                ):
+                                    with patch.object(
+                                        self.module,
+                                        "verify_armable",
+                                        side_effect=lambda _mav: calls.append("verify_armable"),
+                                    ):
+                                        with patch.dict(os.environ, {}, clear=True):
+                                            self.module.run_post_start_setup(["mocap", "39.98329", "116.34745", "50.0"])
+
+        self.assertEqual(
+            calls,
+            [
+                "wait_mavlink",
+                "send_origin",
+                "wait_ready",
                 "wait_ready",
                 "verify_armable",
             ],

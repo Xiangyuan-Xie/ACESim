@@ -67,7 +67,6 @@ def install_fake_ros2_bridge_dependencies() -> None:
         def __init__(self) -> None:
             self.timestamp = 0
             self.arm_position: list[float] = []
-            self.arm_velocity: list[float] = []
 
     class PackageNotFoundError(Exception):
         pass

@@ -95,7 +95,7 @@ class BridgePluginTests(unittest.TestCase):
         message = node.publishers[0].messages[0]
         self.assertEqual(message.timestamp, 123456)
         self.assertEqual(message.arm_position, [0.1, 0.2, 0.3, 0.4, 0.5])
-        self.assertEqual(message.arm_velocity, [1.1, 1.2, 1.3, 1.4, 1.5])
+        self.assertFalse(hasattr(message, "arm_velocity"))
 
     def test_arm_state_plugin_trims_seven_joint_visual_payload_for_px4(self) -> None:
         node = _FakeNode()
@@ -141,7 +141,7 @@ class BridgePluginTests(unittest.TestCase):
         message = node.publishers[0].messages[0]
         self.assertEqual(message.timestamp, 123456)
         self.assertEqual(message.arm_position, [0.1, 0.2, 0.3, 0.4, 0.5])
-        self.assertEqual(message.arm_velocity, [1.1, 1.2, 1.3, 1.4, 1.5])
+        self.assertFalse(hasattr(message, "arm_velocity"))
 
 
 if __name__ == "__main__":
