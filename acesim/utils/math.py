@@ -30,3 +30,9 @@ def calculate_slider_position(
     adjusted_theta = theta_rad + calibration_offset
     x = r * math.cos(adjusted_theta) + math.sqrt(L * L - (r * math.sin(adjusted_theta)) ** 2)
     return np.clip(x - 0.00778, 0, 0.04225)
+
+
+def calculate_coupled_gripper_positions(joint5_rad: float) -> tuple[float, float]:
+    """Return MuJoCo left/right gripper slider qpos coupled to joint_5."""
+    opening = 0.04225 - float(calculate_slider_position(abs(float(joint5_rad))))
+    return -opening, opening
