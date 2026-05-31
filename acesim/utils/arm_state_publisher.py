@@ -6,6 +6,7 @@ positions, velocities, and efforts of the exported arm and gripper joints.
 
 from __future__ import annotations
 
+import os
 from typing import Sequence
 
 from acesim.utils.sim_streams import ArmStateCodec, LatestZmqPublisher
@@ -21,6 +22,7 @@ class ArmStatePublisher:
         zmq_endpoint: str = "tcp://0.0.0.0:5603",
         enable_zmq: bool = True,
     ) -> None:
+        zmq_endpoint = os.environ.get("ACESIM_ARM_STATE_ZMQ_ENDPOINT", zmq_endpoint)
         self._publisher = LatestZmqPublisher(zmq_endpoint, enabled=enable_zmq)
 
     def publish(

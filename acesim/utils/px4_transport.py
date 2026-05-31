@@ -6,6 +6,7 @@ the latest actuator frame on the main simulation thread. This module does not
 try to hide malformed input or support multiple transport strategies.
 """
 
+import os
 import threading
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence, TypeAlias
@@ -192,7 +193,7 @@ class PX4Transport:
     ) -> None:
         """Create the transport and bind the local MAVLink TCP endpoint immediately."""
 
-        self._port: int = port
+        self._port: int = int(os.environ.get("ACESIM_PX4_SIM_TCP_PORT", port))
         self._actuator_params = actuator_params
         self._hil_io_lock = threading.Lock()
         self._hil_mavlink_connection: Any = mavutil.mavlink_connection(

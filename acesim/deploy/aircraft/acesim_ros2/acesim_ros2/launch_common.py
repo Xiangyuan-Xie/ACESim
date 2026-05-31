@@ -94,9 +94,11 @@ def load_px4_repo_path(override: Optional[str]) -> str:
     return str((detect_acesim_root() / "third_party" / "aircraft" / "PX4-Autopilot").resolve())
 
 
-def resolve_px4_startup_env() -> dict[str, str]:
+def resolve_px4_startup_env(config_loader: ConfigLoader | None = None) -> dict[str, str]:
     """Map the configured ACESim asset onto the PX4 airframe startup environment."""
-    asset_name = ConfigLoader().get_asset_name()
+    if config_loader is None:
+        config_loader = ConfigLoader()
+    asset_name = config_loader.get_asset_name()
     startup_env = PX4_STARTUP_ENV_BY_ASSET.get(asset_name)
     if startup_env is not None:
         return dict(startup_env)
@@ -104,12 +106,14 @@ def resolve_px4_startup_env() -> dict[str, str]:
     raise ValueError(f"Unsupported PX4 startup asset: {asset_name}. Supported assets: {supported_assets}")
 
 
-def build_px4_additional_env() -> dict[str, str]:
+def build_px4_additional_env(config_loader: ConfigLoader | None = None) -> dict[str, str]:
+    if config_loader is None:
+        config_loader = ConfigLoader()
     sensor_params = PX4SensorParams.from_asset_params(
-        ConfigLoader().get_asset_params(),
+        config_loader.get_asset_params(),
         dynamic_hil_sensor_fields=False,
     )
-    additional_env = resolve_px4_startup_env()
+    additional_env = resolve_px4_startup_env(config_loader)
 
     additional_env.update(
         {

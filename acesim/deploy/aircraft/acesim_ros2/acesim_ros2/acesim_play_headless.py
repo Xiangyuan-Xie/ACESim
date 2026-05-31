@@ -1,14 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import signal
+from pathlib import Path
 
+from acesim.config.config_loader import ConfigLoader
 from acesim.core.play import make_env
 from acesim.env.base_env import BaseEnv
-
-
-class ShutdownRequested(Exception):
-    """Raised by the SIGTERM handler so launch shutdown exits quietly."""
-
 
 _shutdown_requested = False
 
@@ -18,26 +16,35 @@ def _request_shutdown(_signum: int, _frame: object) -> None:
     _shutdown_requested = True
 
 
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", help="Path to an ACESim config file.")
+    return parser
+
+
+def _parse_args() -> argparse.Namespace:
+    return _build_arg_parser().parse_args()
+
+
 def main() -> int:
     global _shutdown_requested
+    args = _parse_args()
     _shutdown_requested = False
     signal.signal(signal.SIGINT, _request_shutdown)
     signal.signal(signal.SIGTERM, _request_shutdown)
     env: BaseEnv | None = None
     try:
-        env = make_env()
+        env = make_env(ConfigLoader(Path(args.config))) if args.config else make_env()
         while not _shutdown_requested:
             env.step()
-    except (KeyboardInterrupt, ShutdownRequested):
+    except KeyboardInterrupt:
         _shutdown_requested = True
     finally:
         if env is not None:
             try:
                 env.close()
-            except (KeyboardInterrupt, ShutdownRequested):
+            except KeyboardInterrupt:
                 _shutdown_requested = True
-    if _shutdown_requested:
-        return 0
     return 0
 
 

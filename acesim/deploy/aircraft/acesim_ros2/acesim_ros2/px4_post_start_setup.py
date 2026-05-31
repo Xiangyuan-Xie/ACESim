@@ -86,8 +86,9 @@ def send_heartbeat(mav: Any) -> None:
 
 
 def wait_for_mavlink(mav: Any) -> None:
+    mavlink_url = _px4_mavlink_url()
     print(
-        f"PX4 post-start setup: waiting for PX4 MAVLink on {PX4_MAVLINK_URL}",
+        f"PX4 post-start setup: waiting for PX4 MAVLink on {mavlink_url}",
         flush=True,
     )
     deadline = time.monotonic() + PX4_CONNECT_TIMEOUT_SEC
@@ -106,9 +107,11 @@ def wait_for_mavlink(mav: Any) -> None:
             )
             next_status = now + 10.0
 
-    raise RuntimeError(
-        f"Failed to connect to PX4 MAVLink on {PX4_MAVLINK_URL} " f"within {PX4_CONNECT_TIMEOUT_SEC:.0f}s"
-    )
+    raise RuntimeError(f"Failed to connect to PX4 MAVLink on {mavlink_url} " f"within {PX4_CONNECT_TIMEOUT_SEC:.0f}s")
+
+
+def _px4_mavlink_url() -> str:
+    return os.environ.get("ACESIM_PX4_MAVLINK_URL", PX4_MAVLINK_URL)
 
 
 def _format_estimator_flags(mask: int) -> str:
@@ -613,13 +616,35 @@ def _should_retry_armability_failure(exc: RuntimeError) -> bool:
     )
 
 
+def _should_retry_readiness_failure(exc: RuntimeError) -> bool:
+    return "PX4 estimator did not become ready for arming before timeout" in str(exc)
+
+
 def wait_for_mocap_armability(mav: Any, gps_home_lat: float, gps_home_lon: float) -> None:
     verify_armable_enabled = os.environ.get("ACESIM_PX4_VERIFY_ARMABLE", "1") != "0"
     deadline = time.monotonic() + ARMABILITY_TOTAL_TIMEOUT_SEC
     last_armability_error: RuntimeError | None = None
+    last_readiness_error: RuntimeError | None = None
 
     while time.monotonic() < deadline:
-        wait_for_estimator_ready(mav, gps_home_lat, gps_home_lon)
+        remaining = max(0.0, deadline - time.monotonic())
+        try:
+            wait_for_estimator_ready(mav, gps_home_lat, gps_home_lon, timeout_sec=min(45.0, remaining))
+        except RuntimeError as exc:
+            if not _should_retry_readiness_failure(exc):
+                raise
+            last_readiness_error = exc
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                break
+            print(
+                "PX4 post-start setup: estimator readiness did not stay stable yet; "
+                f"waiting for PX4 to settle and retrying. Last error: {exc}",
+                flush=True,
+            )
+            time.sleep(min(ARMABILITY_RETRY_DELAY_SEC, remaining))
+            continue
+
         if not verify_armable_enabled:
             return
 
@@ -643,6 +668,8 @@ def wait_for_mocap_armability(mav: Any, gps_home_lat: float, gps_home_lon: float
     message = "PX4 did not become armable before timeout"
     if last_armability_error is not None:
         message += f". Last armability error: {last_armability_error}"
+    if last_readiness_error is not None:
+        message += f". Last readiness error: {last_readiness_error}"
     raise RuntimeError(message)
 
 
@@ -659,7 +686,7 @@ def run_post_start_setup(argv: list[str]) -> None:
     gps_alt_start = float(argv[3])
 
     mav = mavutil.mavlink_connection(
-        PX4_MAVLINK_URL,
+        _px4_mavlink_url(),
         source_system=250,
         source_component=190,
         autoreconnect=True,

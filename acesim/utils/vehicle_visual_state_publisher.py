@@ -7,6 +7,7 @@ NWU frame and the body attitude quaternion is scalar-first.
 
 from __future__ import annotations
 
+import os
 import struct
 from dataclasses import dataclass
 from typing import Mapping
@@ -35,7 +36,10 @@ class VehicleVisualStreamParams:
         return cls(
             enabled=bool(config.get("enabled", False)),
             rate_hz=float(config.get("rate_hz", 120.0)),
-            zmq_endpoint=str(config.get("zmq_endpoint", "tcp://0.0.0.0:5601")),
+            zmq_endpoint=os.environ.get(
+                "ACESIM_VISUAL_ZMQ_ENDPOINT",
+                str(config.get("zmq_endpoint", "tcp://0.0.0.0:5601")),
+            ),
         )
 
 

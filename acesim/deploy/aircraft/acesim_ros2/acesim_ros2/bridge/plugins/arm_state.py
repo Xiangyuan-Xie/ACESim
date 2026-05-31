@@ -16,7 +16,6 @@ PX4_ARM_JOINT_COUNT = 5
 class DecodedArmState:
     timestamp_us: int
     position: list[float]
-    velocity: list[float]
 
 
 def apply_defaults(raw_bridge: dict[str, object]) -> dict[str, object]:
@@ -28,7 +27,6 @@ def decode_payload(payload: bytes) -> DecodedArmState:
     return DecodedArmState(
         timestamp_us=int(decoded["timestamp_us"]),
         position=list(decoded["positions"]),
-        velocity=list(decoded["velocities"]),
     )
 
 
@@ -52,7 +50,6 @@ def build_sink(node: Any, bridge_config: BridgeConfig) -> Callable[[DecodedArmSt
         message = ArmJointState()
         message.timestamp = decoded.timestamp_us
         message.arm_position = list(decoded.position[:PX4_ARM_JOINT_COUNT])
-        message.arm_velocity = list(decoded.velocity[:PX4_ARM_JOINT_COUNT])
         publisher.publish(message)
 
     return publish

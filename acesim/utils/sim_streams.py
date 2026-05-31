@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import struct
 from typing import Sequence, TypedDict
 
@@ -123,6 +124,7 @@ class ClockPublisher:
     """Publish simulation clock samples over the standard clock stream."""
 
     def __init__(self, zmq_endpoint: str = "tcp://0.0.0.0:5600", enable_zmq: bool = True) -> None:
+        zmq_endpoint = os.environ.get("ACESIM_CLOCK_ZMQ_ENDPOINT", zmq_endpoint)
         self._publisher = LatestZmqPublisher(zmq_endpoint, enabled=enable_zmq)
 
     def publish(self, timestamp_us: int) -> None:
