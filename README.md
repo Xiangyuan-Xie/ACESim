@@ -36,6 +36,7 @@
         <li><a href="#资产画廊">资产画廊</a></li>
         <li><a href="#配置">配置</a></li>
         <li><a href="#ros-2--px4">ROS 2 / PX4</a></li>
+        <li><a href="#ue5-视觉流联调">UE5 视觉流联调</a></li>
         <li><a href="#资产工具链">资产工具链</a></li>
       </ul>
     </li>
@@ -214,6 +215,88 @@ ros2 launch acesim_ros2 wsl.launch.py px4_repo:=/path/to/PX4-Autopilot
 ```bash
 ros2 launch acesim_ros2 linux.launch.py
 ```
+
+Headless launch：
+
+```bash
+ros2 launch acesim_ros2 linux_headless.launch.py
+```
+
+可执行入口：
+
+- `acesim_play = acesim_ros2.acesim_play:main`
+- `acesim_play_headless = acesim_ros2.acesim_play_headless:main`
+- `acesim_bridge = acesim_ros2.acesim_bridge:main`
+- `x500_arm2x_benchmark = acesim_ros2.benchmark.x500_arm2x:main`
+
+ACESim 支持接入 PX4，但它是可选能力，不是使用门槛。PX4 相关逻辑主要由以下模块组织：
+
+- `acesim/utils/px4_transport.py`
+- `acesim/utils/px4_sensor_scheduler.py`
+
+如未显式传入 PX4 仓库路径，ROS 2 启动逻辑默认会尝试使用：
+
+```text
+acesim/third_party/aircraft/PX4-Autopilot
+```
+
+对于 ACESim 中的 AM Position：
+
+- 需要有效的 manual-control source，例如 QGC virtual joystick 或 RC。
+- 这一要求由模式实现本身固定提供，与 Position 模式对齐，而不是由 launch 参数覆写决定。
+- 摇杆回中不会阻止进入模式，而是进入保持行为。
+- 如果修改了 `acesim/deploy/aircraft/px4_msgs` 下的 `.msg` / `.srv` 接口，首次需要对 ROS 2 工作区做一次 clean rebuild。
+
+### UE5 视觉流联调
+
+UE5 作为渲染前端使用，ACESim / MuJoCo 仍然是动力学权威。完整桥接流程、ACESimUE 子模块工程管理和预留传感器反馈端点见 `acesim/third_party/unreal/ACESimUE/README.md`。
+
+UE 渲染 launch：
+
+```bash
+ros2 launch acesim_ros2 linux_ue.launch.py
+```
+
+默认 packaged runtime 路径：
+
+```text
+/home/xxy/ACESim-unreal/packages/ACESimUE-Linux/Linux/ACESimUE/Binaries/Linux/ACESimUE
+```
+
+如果还没有打包，先运行：
+
+```bash
+bash acesim/third_party/unreal/ACESimUE/Tools/package_ue_runtime.sh
+```
+
+Editor 开发模式需要显式传 `ue_mode:=editor`，它会启动 `UnrealEditor <uproject> -game`，首次运行可能触发 shader / DDC 编译。
+
+UE5 相关工具位于：
+
+- `acesim/third_party/unreal/ACESimUE`
+- `acesim/third_party/unreal/ACESimUE/README.md`
+- `acesim/third_party/unreal/ACESimUE/Tools/check_ubuntu_ue5_host.sh`
+- `acesim/third_party/unreal/ACESimUE/Tools/setup_ubuntu_ue5.sh`
+- `acesim/third_party/unreal/ACESimUE/Tools/package_ue_runtime.sh`
+- `acesim/third_party/unreal/ACESimUE/Tools/verify_visual_stream.py`
+- `acesim/third_party/unreal/ACESimUE/Tools/verify_ue_runtime_visual.py`
+
+`UnrealEngine` 本体不作为本仓库子模块管理，默认仍放在 `/home/xxy/ACESim-unreal/UnrealEngine`；ACESim 自己的 UE 项目源码在 `acesim/third_party/unreal/ACESimUE` 子模块中维护，并直接作为 UE Editor、UBT、UAT 的工作工程。
+
+首次拉取 UE 子模块后需要拉取 Git LFS 资产并做一次资产预检：
+
+```bash
+git -C acesim/third_party/unreal/ACESimUE lfs pull
+python3 acesim/third_party/unreal/ACESimUE/Tools/verify_acesim_assets.py
+```
+
+如果只是验证视觉流链路，建议先运行：
+
+```bash
+python3 acesim/third_party/unreal/ACESimUE/Tools/verify_visual_stream.py --samples 5 --timeout-sec 10
+```
+
+如果要搭建 UE5 runtime，再阅读 `acesim/third_party/unreal/ACESimUE/README.md`。ROS 2 日常启动建议先打包，再用 `ros2 launch acesim_ros2 linux_ue.launch.py` 启动 packaged runtime。
 
 ### 资产工具链
 

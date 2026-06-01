@@ -40,6 +40,7 @@
         <li><a href="#asset-gallery">Asset Gallery</a></li>
         <li><a href="#configuration">Configuration</a></li>
         <li><a href="#ros-2--px4">ROS 2 / PX4</a></li>
+        <li><a href="#ue5-visual-stream-integration">UE5 Visual Stream Integration</a></li>
         <li><a href="#asset-toolchain">Asset Toolchain</a></li>
       </ul>
     </li>
@@ -255,6 +256,57 @@ For ACESim AM Position:
 - This requirement is fixed by the mode implementation and follows Position mode behavior; it is not overridden by launch arguments.
 - Centering the stick does not block mode entry. It enters hold behavior instead.
 - If `.msg` or `.srv` interfaces under `acesim/deploy/aircraft/px4_msgs` change, the ROS 2 workspace needs one clean rebuild.
+
+### UE5 Visual Stream Integration
+
+UE5 is used as the rendering frontend, while ACESim / MuJoCo remains the dynamics authority. See `acesim/third_party/unreal/ACESimUE/README.md` for the complete bridge workflow, ACESimUE submodule project management, and reserved sensor-feedback endpoints.
+
+UE rendering launch:
+
+```bash
+ros2 launch acesim_ros2 linux_ue.launch.py
+```
+
+Default packaged runtime path:
+
+```text
+/home/xxy/ACESim-unreal/packages/ACESimUE-Linux/Linux/ACESimUE/Binaries/Linux/ACESimUE
+```
+
+Package the runtime first if it does not exist yet:
+
+```bash
+bash acesim/third_party/unreal/ACESimUE/Tools/package_ue_runtime.sh
+```
+
+Editor development mode requires `ue_mode:=editor`. It launches `UnrealEditor <uproject> -game`, and the first run may trigger shader / DDC compilation.
+
+UE5-related tools live in:
+
+- `acesim/third_party/unreal/ACESimUE`
+- `acesim/third_party/unreal/ACESimUE/README.md`
+- `acesim/third_party/unreal/ACESimUE/Tools/check_ubuntu_ue5_host.sh`
+- `acesim/third_party/unreal/ACESimUE/Tools/setup_ubuntu_ue5.sh`
+- `acesim/third_party/unreal/ACESimUE/Tools/package_ue_runtime.sh`
+- `acesim/third_party/unreal/ACESimUE/Tools/verify_visual_stream.py`
+- `acesim/third_party/unreal/ACESimUE/Tools/verify_ue_runtime_visual.py`
+
+`UnrealEngine` itself is not managed as a submodule in this repository. It remains at `/home/xxy/ACESim-unreal/UnrealEngine` by default. The ACESim UE project source is maintained in the `acesim/third_party/unreal/ACESimUE` submodule and is used directly as the UE Editor, UBT, and UAT work project.
+
+After first pulling the UE submodule, fetch its Git LFS assets and run one asset preflight check:
+
+```bash
+git -C acesim/third_party/unreal/ACESimUE lfs pull
+python3 acesim/third_party/unreal/ACESimUE/Tools/verify_acesim_assets.py
+```
+
+For a visual-stream link check, start with:
+
+```bash
+python3 acesim/third_party/unreal/ACESimUE/Tools/verify_visual_stream.py --samples 5 --timeout-sec 10
+```
+
+Read `acesim/third_party/unreal/ACESimUE/README.md` when setting up the UE5 runtime. For daily ROS 2 use, package first, then start the packaged runtime with `ros2 launch acesim_ros2 linux_ue.launch.py`.
 
 ### Asset Toolchain
 
