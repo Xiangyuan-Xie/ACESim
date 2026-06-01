@@ -8,9 +8,11 @@ setup(
     long_description_content_type="text/markdown",
     author="Xiangyuan Xie",
     author_email="dragonboat_xxy@163.com",
+    license="Apache-2.0",
     keywords=["python", "px4", "mujoco", "simulation"],
     classifiers=[
         "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.9",
