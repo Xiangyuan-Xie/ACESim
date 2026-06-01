@@ -10,3 +10,7 @@
 	path = acesim/deploy/aircraft/px4_msgs
 	url = https://github.com/Xiangyuan-Xie/px4_msgs
 	branch = ACEPliot
+[submodule "acesim/third_party/unreal/ACESimUE"]
+	path = acesim/third_party/unreal/ACESimUE
+	url = git@github.com:Xiangyuan-Xie/ACESimUE.git
+	branch = main
