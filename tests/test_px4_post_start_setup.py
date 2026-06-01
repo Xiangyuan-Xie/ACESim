@@ -635,7 +635,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
             ],
         )
 
-    def test_mocap_post_start_prints_ue_ready_message_after_armability_verification(self) -> None:
+    def test_mocap_post_start_prints_custom_ready_message_after_armability_verification(self) -> None:
         mav = object()
 
         with patch.object(self.module.mavutil, "mavlink_connection", return_value=mav):
@@ -647,14 +647,14 @@ class PX4PostStartSetupTests(unittest.TestCase):
                                 os.environ,
                                 {
                                     "ACESIM_PX4_VERIFY_ARMABLE": "1",
-                                    "ACESIM_PX4_READY_CONTEXT": "UE mode",
+                                    "ACESIM_PX4_READY_CONTEXT": "custom frontend",
                                 },
                             ):
                                 with patch("builtins.print") as print_mock:
                                     self.module.run_post_start_setup(["mocap", "39.98329", "116.34745", "50.0"])
 
         printed = "\n".join(str(call.args[0]) for call in print_mock.call_args_list if call.args)
-        self.assertIn("PX4 estimator and armability verified for UE mode", printed)
+        self.assertIn("PX4 estimator and armability verified for custom frontend", printed)
 
     def test_verify_armable_arms_then_disarms(self) -> None:
         mav = _FakeMavConnection(

@@ -699,24 +699,6 @@ bridges:
         self.assertIs(exit_handler.event_handler.target_action, play_node)
         self.assertEqual(exit_handler.event_handler.on_exit[0].event.reason, "ACESim frontend exited")
 
-    def test_build_launch_entities_shutdowns_when_ue_frontend_exits(self) -> None:
-        with patch.object(
-            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
-        ):
-            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
-                entities = self.launch_common.build_launch_entities("/tmp/px4", play_executable="acesim_play_ue")
-
-        play_node = self._play_action(entities, "acesim_play_ue")
-        exit_handler: Any = next(
-            entity
-            for entity in entities
-            if getattr(getattr(entity, "event_handler", None), "on_exit", None) is not None
-        )
-
-        self.assertEqual(play_node.executable, "acesim_play_ue")
-        self.assertIs(exit_handler.event_handler.target_action, play_node)
-        self.assertEqual(exit_handler.event_handler.on_exit[0].event.reason, "ACESim frontend exited")
-
     def test_build_launch_entities_starts_frontend_after_post_start_setup(self) -> None:
         with patch.object(
             self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
@@ -741,30 +723,6 @@ bridges:
         self.assertEqual(post_start_process.additional_env["ACESIM_PX4_VERIFY_ARMABLE"], "1")
         self.assertEqual(play_node.executable, "acesim_play")
         self.assertEqual(timer.period, 2.0)
-
-    def test_build_launch_entities_starts_ue_frontend_after_post_start_setup_with_longer_delay(self) -> None:
-        with patch.object(
-            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
-        ):
-            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
-                entities = self.launch_common.build_launch_entities("/tmp/px4", play_executable="acesim_play_ue")
-
-        post_start_process: Any = next(
-            entity for entity in entities if "acesim_ros2.px4_post_start_setup" in " ".join(getattr(entity, "cmd", []))
-        )
-        start_handler: Any = next(
-            entity
-            for entity in entities
-            if getattr(getattr(entity, "event_handler", None), "on_start", None) is not None
-            and entity.event_handler.target_action is post_start_process
-        )
-        timer = start_handler.event_handler.on_start[0]
-        play_node = timer.actions[0]
-
-        self.assertEqual(play_node.executable, "acesim_play_ue")
-        self.assertEqual(timer.period, 8.0)
-        self.assertEqual(post_start_process.additional_env["ACESIM_PX4_VERIFY_ARMABLE"], "1")
-        self.assertEqual(post_start_process.additional_env["ACESIM_PX4_READY_CONTEXT"], "UE mode")
 
     def test_build_launch_entities_does_not_add_frontend_shutdown_without_play_node(self) -> None:
         with patch.object(
@@ -791,14 +749,14 @@ bridges:
             with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
                 entities = self.launch_common.build_launch_entities(
                     "/tmp/px4",
-                    play_executable="acesim_play_ue",
-                    additional_play_env={"ACESIM_UE_EXECUTABLE": "/tmp/ACESimUE"},
+                    play_executable="acesim_play",
+                    additional_play_env={"ACESIM_EXTRA_ENV": "1"},
                 )
 
-        play_node = self._play_action(entities, "acesim_play_ue")
-        self.assertEqual(play_node.executable, "acesim_play_ue")
+        play_node = self._play_action(entities, "acesim_play")
+        self.assertEqual(play_node.executable, "acesim_play")
         self.assertEqual(play_node.kwargs["additional_env"]["PYTHONUNBUFFERED"], "1")
-        self.assertEqual(play_node.kwargs["additional_env"]["ACESIM_UE_EXECUTABLE"], "/tmp/ACESimUE")
+        self.assertEqual(play_node.kwargs["additional_env"]["ACESIM_EXTRA_ENV"], "1")
 
     def test_build_px4_post_start_setup_process_sets_unbuffered_python_output(self) -> None:
         with patch.object(
