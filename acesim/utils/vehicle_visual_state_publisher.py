@@ -1,8 +1,8 @@
 """ZeroMQ publisher for MuJoCo vehicle visual state samples.
 
-The payload is fixed-size and intended for low-latency visualization clients
-such as Unreal Engine. World-frame values are published in ACESim's canonical
-NWU frame and the body attitude quaternion is scalar-first.
+The payload is fixed-size and intended for low-latency visualization clients.
+World-frame values are published in ACESim's canonical NWU frame and the body
+attitude quaternion is scalar-first.
 """
 
 from __future__ import annotations

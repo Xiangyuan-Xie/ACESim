@@ -486,13 +486,9 @@ def build_launch_entities(
     ]
 
     acesim_play = build_play_action(play_executable, additional_play_env) if play_executable else None
-    if play_executable == "acesim_play_ue" and play_start_delay_sec == 2.0:
-        play_start_delay_sec = 8.0
     px4_post_start_setup = None
     if enable_px4_post_start_setup:
         post_start_env = {"ACESIM_PX4_VERIFY_ARMABLE": os.environ.get("ACESIM_PX4_VERIFY_ARMABLE", "1")}
-        if play_executable == "acesim_play_ue":
-            post_start_env["ACESIM_PX4_READY_CONTEXT"] = "UE mode"
         px4_post_start_setup = build_px4_post_start_setup_process(post_start_env)
         entities.append(px4_post_start_setup)
 
