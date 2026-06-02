@@ -554,7 +554,7 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
         finally:
             env.close()
 
-    def test_default_x500_arm_scene_injects_shared_landing_pad_geom_and_home_height(self) -> None:
+    def test_default_x500_arm_scene_keeps_asset_home_without_ue_landing_pad(self) -> None:
         loader = ConfigLoader(_config_path("default"))
         from acesim.env.mujoco.mj_env import MJEnv
 
@@ -572,37 +572,33 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
         merged_xml = MJEnv._merge_scene_robot_xml(merge_env, scene_path, asset_path)
         root = ET.fromstring(merged_xml)
         landing_pad = root.find("./worldbody/geom[@name='acesim_landing_pad']")
-        self.assertIsNotNone(landing_pad)
-        assert landing_pad is not None
-        self.assertEqual(landing_pad.get("type"), "cylinder")
-        self.assertEqual(landing_pad.get("size"), "3.5 0.02")
-        self.assertEqual(landing_pad.get("pos"), "0 0 0.02")
-        self.assertEqual(landing_pad.get("contype"), "1")
-        self.assertEqual(landing_pad.get("conaffinity"), "1")
+        self.assertIsNone(landing_pad)
 
         scene_home = root.find("./keyframe/key[@name='scene_home']")
-        self.assertIsNotNone(scene_home)
-        assert scene_home is not None
-        qpos = [float(value) for value in scene_home.get("qpos", "").split()]
+        self.assertIsNone(scene_home)
         robot_home = ET.parse(asset_path).getroot().find("./keyframe/key[@name='home']")
         self.assertIsNotNone(robot_home)
         assert robot_home is not None
         robot_qpos = [float(value) for value in robot_home.get("qpos", "").split()]
-        self.assertAlmostEqual(qpos[2], robot_qpos[2] + 0.048)
+        merged_home = root.find("./keyframe/key[@name='home']")
+        self.assertIsNotNone(merged_home)
+        assert merged_home is not None
+        merged_qpos = [float(value) for value in merged_home.get("qpos", "").split()]
+        self.assertAlmostEqual(merged_qpos[2], robot_qpos[2])
 
         model = mujoco.MjModel.from_xml_string(merged_xml)
         data = mujoco.MjData(model)
-        scene_home_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, "scene_home")
-        mujoco.mj_resetDataKeyframe(model, data, scene_home_id)
+        home_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, "home")
+        mujoco.mj_resetDataKeyframe(model, data, home_id)
         mujoco.mj_forward(model, data)
         physical_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "rotor_1")
         visual_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "rotor_1_vis")
         self.assertGreaterEqual(physical_id, 0)
         self.assertGreaterEqual(visual_id, 0)
         for axis in range(3):
-            self.assertAlmostEqual(float(data.xpos[visual_id][axis]), float(data.xpos[physical_id][axis]))
+            self.assertAlmostEqual(float(data.xpos[visual_id][axis]), float(data.xpos[physical_id][axis]), delta=1e-6)
 
-    def test_default_x500_arm_env_resets_to_scene_home_keyframe(self) -> None:
+    def test_default_x500_arm_env_resets_to_asset_home_keyframe(self) -> None:
         loader = ConfigLoader(_config_path("default"))
         module_name, class_name = loader.get_sim_info()
         env_cls = getattr(import_module(module_name), class_name)
@@ -621,7 +617,7 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
             self.assertIsNotNone(robot_home)
             assert robot_home is not None
             robot_qpos = [float(value) for value in robot_home.get("qpos", "").split()]
-            self.assertAlmostEqual(float(env._mj_data.qpos[2]), robot_qpos[2] + 0.048)
+            self.assertAlmostEqual(float(env._mj_data.qpos[2]), robot_qpos[2])
             self.assertAlmostEqual(float(env._mj_data.qpos[3]), 1.0)
             self.assertAlmostEqual(float(env._mj_data.qpos[4]), 0.0)
             self.assertAlmostEqual(float(env._mj_data.qpos[5]), 0.0)

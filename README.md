@@ -271,7 +271,7 @@ pre-commit run --all-files
 
 ### 子模块修改
 
-如果需要修改 `acesim/deploy/aircraft/px4_msgs/`、`acesim/third_party/aircraft/PX4-Autopilot/`、`acesim/third_party/aircraft/Micro-XRCE-DDS-Agent/`、`acesim/third_party/unreal/ACESimUE/` 或其他子模块，请先在对应子模块内完成修改并提交：
+如果需要修改 `acesim/deploy/aircraft/px4_msgs/`、`acesim/third_party/aircraft/PX4-Autopilot/`、`acesim/third_party/aircraft/Micro-XRCE-DDS-Agent/` 或其他子模块，请先在对应子模块内完成修改并提交：
 
 ```bash
 cd acesim/deploy/aircraft/px4_msgs
