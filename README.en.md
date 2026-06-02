@@ -202,11 +202,18 @@ benchmark = "multirotor"
 
 Core fields:
 
-- `basic.sim_type`: simulation backend, such as `mujoco` or `genesis`.
-- `basic.env_type`: environment type, such as `mc`, `am`, `fw`, `vtol`, or `uuv`.
-- `basic.scene_name`: scene name.
-- `basic.asset_name`: asset parameter filename.
-- `basic.benchmark`: benchmark or runtime grouping field.
+- `basic.sim_type`
+  - Description: simulation backend.
+  - Values: `mujoco`, `genesis`.
+- `basic.env_type`
+  - Description: environment type.
+  - Values: `mc`, `am`, `fw`, `vtol`, `uuv`.
+- `basic.scene_name`
+  - Description: scene name.
+- `basic.asset_name`
+  - Description: asset parameter filename.
+- `basic.benchmark`
+  - Description: benchmark or runtime grouping field.
 
 ACESim first reads the top-level `basic` configuration, then loads asset parameters from `acesim/config/<sim_type>/<asset_name>.toml`. To switch backend, environment type, or asset, start with the `basic` table in `default.toml`.
 
@@ -258,6 +265,8 @@ Common tools in this repository:
 - `acesim.tools.render_readme_assets`: renders README asset previews.
 - `acesim/tools/cal_dynamic_params.py`: helper for dynamics parameters.
 - `acesim/tools/cal_thrust_coef.py`: helper for thrust coefficients.
+
+Running `python -m acesim.tools.sdf2urdf` or `python -m acesim.tools.urdf2mjcf` without arguments opens that tool's BIOS-style TUI by default.
 
 The current `sdf2urdf` interface is designed for general SDF sources, but the provider already implemented in this repository is mainly `px4`.
 
