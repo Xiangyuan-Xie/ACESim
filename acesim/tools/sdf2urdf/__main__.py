@@ -12,12 +12,22 @@ from acesim.tools.sdf2urdf import (
 )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description="Synchronize ACESim URDF assets from an SDF source provider.")
+    parser.add_argument("--tui", action="store_true", help="Launch the interactive terminal UI.")
     parser.add_argument("--source", default="px4", help="SDF source provider name.")
-    parser.add_argument("--target", required=True, help="Asset target name.")
+    parser.add_argument("--target", help="Asset target name.")
     parser.add_argument("--cleanup", action="store_true", help="Delete stale generated meshes after sync.")
-    args = parser.parse_args()
+    args = parser.parse_args(raw_argv)
+
+    if args.tui or not raw_argv:
+        from acesim.tools.sdf2urdf import tui
+
+        return tui.main()
+
+    if not args.target:
+        parser.error("--target is required unless --tui is used")
 
     config = AssetToolchainConfig(target=args.target)
     paths = AssetPaths.for_target(args.target)

@@ -39,32 +39,32 @@ XML_SENSOR_BLOCK = textwrap.dedent("""
 XML_ARM_ACTUATORS = textwrap.dedent("""
     <actuator>
         <position
-            name="joint_1" joint="joint_1" kp="748.6" kv="0.547"
-            forcerange="-4.905 4.905" ctrlrange="-2.6485 2.6485"
+            name="joint_1" joint="joint_1" kp="60.05" kv="3.54"
+            forcerange="-5.24 5.24" ctrlrange="-2.6485 2.6485"
         />
         <position
-            name="joint_2" joint="joint_2" kp="524.0" kv="0.727"
-            forcerange="-3.43 3.43" ctrlrange="0 3.4907"
+            name="joint_2" joint="joint_2" kp="44.95" kv="1.75"
+            forcerange="-3.92 3.92" ctrlrange="0 3.4907"
         />
         <position
-            name="joint_3" joint="joint_3" kp="524.0" kv="0.727"
-            forcerange="-3.43 3.43" ctrlrange="-2.6485 2.6485"
+            name="joint_3" joint="joint_3" kp="31.47" kv="0.58"
+            forcerange="-2.75 2.75" ctrlrange="-2.6485 2.6485"
         />
         <position
-            name="joint_4" joint="joint_4" kp="524.0" kv="0.727"
-            forcerange="-3.43 3.43" ctrlrange="-3.1416 3.1416"
+            name="joint_4" joint="joint_4" kp="12.77" kv="0.106"
+            forcerange="-1.11 1.11" ctrlrange="-3.1416 3.1416"
         />
         <position
-            name="joint_5" joint="joint_5" kp="212.6" kv="0.133"
-            forcerange="-1.3916 1.3916" ctrlrange="-1.723 0"
+            name="joint_5" joint="joint_5" kp="12.77" kv="0.106"
+            forcerange="-1.11 1.11" ctrlrange="-1.723 0"
         />
         <position
-            name="joint_gripper_left" joint="joint_gripper_left" kp="2000.0" kv="124.0"
-            forcerange="-49.06 49.06" ctrlrange="-0.04225 0"
+            name="joint_gripper_left" joint="joint_gripper_left" kp="10600.0" kv="88.6"
+            forcerange="-22.7 22.7" ctrlrange="-0.04225 0"
         />
         <position
-            name="joint_gripper_right" joint="joint_gripper_right" kp="2000.0" kv="124.0"
-            forcerange="-49.06 49.06" ctrlrange="0 0.04225"
+            name="joint_gripper_right" joint="joint_gripper_right" kp="10600.0" kv="88.6"
+            forcerange="-22.7 22.7" ctrlrange="-0.04225 0"
         />
     </actuator>
     """).strip()
@@ -569,7 +569,7 @@ def postprocess_xml(
             rotor_id = match.group(1)
             for geom in body.findall("geom"):
                 mesh = geom.get("mesh")
-                if mesh:
+                if mesh and "_decomp_" not in mesh:
                     rotor_visual_geom_map.setdefault(rotor_id, []).append(deepcopy(geom))
             rotor_visual_center_local[body_name] = [0.0, 0.0, 0.0]
             if rotor_id in rotor_visual_geom_map and rotor_visual_geom_map[rotor_id]:
@@ -734,7 +734,7 @@ def postprocess_xml(
             elif geom.get("contype") == "1" or geom.get("conaffinity") == "1":
                 if geom.get("group") != "1":
                     is_collision = True
-            if mesh_name.startswith("rotor_"):
+            if mesh_name.startswith("rotor_") and "_decomp_" not in mesh_name:
                 is_collision = False
 
         geom.set("group", "3" if is_collision else "1")

@@ -14,7 +14,7 @@ from acesim.tools.sdf2urdf.asset_context import AssetToolchainConfig as SDFAsset
 from .asset_context import AssetPaths, AssetToolchainConfig
 from .mesh_processing import clean_artifacts, process_urdf_collisions
 from .mjcf_ops import euler_to_quat, fmt_floats, postprocess_xml
-from .mujoco_compiler import compile_urdf_to_xml, find_mujoco_compile_binary
+from .mujoco_compiler import compile_urdf_to_xml_with_available_backend, find_mujoco_compile_binary
 from .runtime_handler_registry import runtime_handler_for_target
 from .urdf_ops import calculate_min_z, parse_q0, preprocess_urdf
 from .xml_ops import add_collision_exclusions, indent_xml, inject_xml, sort_attributes
@@ -36,6 +36,7 @@ class URDF2MJCFConverter:
         safety_margin: float = 0.05,
         q0: str = "",
         mujoco_bin: str | None = None,
+        overwrite: bool = False,
     ):
         self.config = AssetToolchainConfig(
             target=target,
@@ -52,6 +53,7 @@ class URDF2MJCFConverter:
         self.safety_margin = safety_margin
         self.q0_str = q0
         self.mujoco_bin = mujoco_bin
+        self.overwrite = overwrite
         self.base_dir = self.paths.base_dir
         self.urdf_path = self.paths.urdf_path
         self.mesh_dir = self.paths.mesh_dir
@@ -130,6 +132,9 @@ class URDF2MJCFConverter:
     def _confirm_overwrite(self) -> None:
         if not self.xml_path.exists():
             return
+        if self.overwrite:
+            self.clean_artifacts()
+            return
         try:
             choice = input(f"Output file {self.xml_path} already exists. Overwrite? [y/N]: ").strip().lower()
         except EOFError as exc:
@@ -166,8 +171,7 @@ class URDF2MJCFConverter:
         print(f"Compiling to {self.xml_path}...")
 
         try:
-            binary = find_mujoco_compile_binary(self.config)
-            compile_urdf_to_xml(binary, tmp_urdf, self.xml_path)
+            compile_urdf_to_xml_with_available_backend(self.config, tmp_urdf, self.xml_path)
         finally:
             tmp_urdf.unlink(missing_ok=True)
             if self.decompose and processing_urdf_path != self.urdf_path:
@@ -185,8 +189,10 @@ class URDF2MJCFConverter:
         print("\nCompilation and post-processing complete.")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description="Compile URDF to MuJoCo XML using URDF2MJCFConverter.")
+    parser.add_argument("--tui", action="store_true", help="Launch the interactive terminal UI.")
     parser.add_argument("--target", type=str, default="ace_leader", help="Target robot name.")
     parser.add_argument("--mujoco-bin", type=str, default=None, help="Path to compile.exe.")
     parser.add_argument("--floating", action="store_true", help="Add floating joint.")
@@ -194,7 +200,12 @@ def main() -> int:
     parser.add_argument("--safety-margin", type=float, default=0.05, help="Extra height margin.")
     parser.add_argument("--q0", type=str, default="", help="Initial joint positions (key=val,key=val).")
 
-    args = parser.parse_args()
+    args = parser.parse_args(raw_argv)
+    if args.tui or not raw_argv:
+        from . import tui
+
+        return tui.main()
+
     converter = URDF2MJCFConverter(
         target=args.target,
         floating=args.floating,
