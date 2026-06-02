@@ -25,6 +25,7 @@ setup(
         "console_scripts": [
             "acesim_play = acesim_ros2.acesim_play:main",
             "acesim_play_headless = acesim_ros2.acesim_play_headless:main",
+            "acesim_play_ue = acesim_ros2.acesim_play_ue:main",
             "acesim_bridge = acesim_ros2.acesim_bridge:main",
             "x500_arm2x_benchmark = acesim_ros2.benchmark.x500_arm2x:main",
         ],
