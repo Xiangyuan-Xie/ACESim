@@ -8,17 +8,17 @@
     name="base_link">
     <inertial>
       <origin
-        xyz="-0.0010307 0.0003139 -0.031209"
+        xyz="-0.012812 0.0001697 -0.056763"
         rpy="0 0 0" />
       <mass
-        value="0.57465" />
+        value="1.9041" />
       <inertia
-        ixx="0.012459"
-        ixy="4.95E-06"
-        ixz="6.337E-05"
-        iyy="0.01195"
-        iyz="-3.99E-06"
-        izz="0.015706" />
+        ixx="0.027709"
+        ixy="5.078E-05"
+        ixz="0.00079484"
+        iyy="0.030189"
+        iyz="-3.846E-05"
+        izz="0.04338" />
     </inertial>
     <visual>
       <origin
@@ -44,298 +44,21 @@
       </geometry>
     </collision>
   </link>
-  <link
-    name="rotor_1">
-    <inertial>
-      <origin
-        xyz="0 0 0.0062143"
-        rpy="0 0 0" />
-      <mass
-        value="0.012" />
-      <inertia
-        ixx="5.699E-05"
-        ixy="-6.08E-06"
-        ixz="0"
-        iyy="1.06E-06"
-        iyz="0"
-        izz="5.789E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://x500_arm2x/meshes/rotor_1.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://x500_arm2x/meshes/rotor_1.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="rotor_joint_1"
-    type="continuous">
-    <origin
-      xyz="0.17688 -0.17688 0.056"
-      rpy="0 0 0" />
-    <parent
-      link="base_link" />
-    <child
-      link="rotor_1" />
-    <axis
-      xyz="0 0 1" />
-    <limit
-      effort="0.18"
-      velocity="1032.2" />
-  </joint>
-  <link
-    name="rotor_2">
-    <inertial>
-      <origin
-        xyz="0 0 0.0062122"
-        rpy="0 0 0" />
-      <mass
-        value="0.012" />
-      <inertia
-        ixx="5.699E-05"
-        ixy="-6.08E-06"
-        ixz="0"
-        iyy="1.06E-06"
-        iyz="0"
-        izz="5.789E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://x500_arm2x/meshes/rotor_2.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://x500_arm2x/meshes/rotor_2.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="rotor_joint_2"
-    type="continuous">
-    <origin
-      xyz="-0.17688 0.17688 0.056"
-      rpy="0 0 0" />
-    <parent
-      link="base_link" />
-    <child
-      link="rotor_2" />
-    <axis
-      xyz="0 0 1" />
-    <limit
-      effort="0.18"
-      velocity="1032.2" />
-  </joint>
-  <link
-    name="rotor_3">
-    <inertial>
-      <origin
-        xyz="0 0 0.0062143"
-        rpy="0 0 0" />
-      <mass
-        value="0.012" />
-      <inertia
-        ixx="5.703E-05"
-        ixy="6.09E-06"
-        ixz="0"
-        iyy="1.06E-06"
-        iyz="0"
-        izz="5.793E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://x500_arm2x/meshes/rotor_3.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://x500_arm2x/meshes/rotor_3.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="rotor_joint_3"
-    type="continuous">
-    <origin
-      xyz="0.17688 0.17688 0.056"
-      rpy="0 0 0" />
-    <parent
-      link="base_link" />
-    <child
-      link="rotor_3" />
-    <axis
-      xyz="0 0 1" />
-    <limit
-      effort="0.18"
-      velocity="1032.2" />
-  </joint>
-  <link
-    name="rotor_4">
-    <inertial>
-      <origin
-        xyz="0 0 0.0062122"
-        rpy="0 0 0" />
-      <mass
-        value="0.012" />
-      <inertia
-        ixx="5.703E-05"
-        ixy="6.09E-06"
-        ixz="0"
-        iyy="1.06E-06"
-        iyz="0"
-        izz="5.793E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://x500_arm2x/meshes/rotor_4.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://x500_arm2x/meshes/rotor_4.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="rotor_joint_4"
-    type="continuous">
-    <origin
-      xyz="-0.17688 -0.17688 0.056"
-      rpy="0 0 0" />
-    <parent
-      link="base_link" />
-    <child
-      link="rotor_4" />
-    <axis
-      xyz="0 0 1" />
-    <limit
-      effort="0.18"
-      velocity="1032.2" />
-  </joint>
-  <link
-    name="link_0">
-    <inertial>
-      <origin
-        xyz="-0.00092141 -0.028837 0.00059023"
-        rpy="0 0 0" />
-      <mass
-        value="0.1134" />
-      <inertia
-        ixx="5.211E-05"
-        ixy="-1.21E-06"
-        ixz="-6E-08"
-        iyy="4.588E-05"
-        iyz="-1.64E-06"
-        izz="5.955E-05" />
-    </inertial>
-    <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://x500_arm2x/meshes/link_0.STL" />
-      </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://x500_arm2x/meshes/link_0.STL" />
-      </geometry>
-    </collision>
-  </link>
-  <joint
-    name="joint_0"
-    type="fixed">
-    <origin
-      xyz="0 0 -0.050515"
-      rpy="1.5708 0 1.5708" />
-    <parent
-      link="base_link" />
-    <child
-      link="link_0" />
-    <axis
-      xyz="0 0 0" />
-  </joint>
   <link
     name="link_1">
     <inertial>
       <origin
-        xyz="-0.018022 0.15628 -0.00061218"
+        xyz="-0.025459 0.17263 -0.00094115"
         rpy="0 0 0" />
       <mass
-        value="0.09846" />
+        value="0.15156" />
       <inertia
-        ixx="0.0006569"
-        ixy="0.0001171"
-        ixz="-1.28E-06"
-        iyy="4.94E-05"
-        iyz="3.77E-06"
-        izz="0.00069136" />
+        ixx="0.00087586"
+        ixy="0.0001761"
+        ixz="-2.32E-06"
+        iyy="9.027E-05"
+        iyz="7.76E-06"
+        izz="0.00092044" />
     </inertial>
     <visual>
       <origin
@@ -365,10 +88,10 @@
     name="joint_1"
     type="revolute">
     <origin
-      xyz="0 -0.04611 0"
-      rpy="3.1416 1.5708 0" />
+      xyz="0 0.0002 -0.1453"
+      rpy="-1.5708 0 3.1416" />
     <parent
-      link="link_0" />
+      link="base_link" />
     <child
       link="link_1" />
     <axis
@@ -376,24 +99,24 @@
     <limit
       lower="-2.6485"
       upper="2.6485"
-      effort="4.9008"
-      velocity="8.95" />
+      effort="5.24"
+      velocity="6.28" />
   </joint>
   <link
     name="link_2">
     <inertial>
       <origin
-        xyz="-0.039143 -0.16259767 -0.00061585"
+        xyz="-0.0392 -0.18256 -0.00068407"
         rpy="0 0 0" />
       <mass
-        value="0.09066" />
+        value="0.14776" />
       <inertia
-        ixx="0.0008232"
-        ixy="-2.318E-05"
-        ixz="-9E-08"
-        iyy="1.244E-05"
-        iyz="-4.54E-06"
-        izz="0.00082489" />
+        ixx="0.0016051"
+        ixy="-4.85E-05"
+        ixz="-1.8E-07"
+        iyy="3.646E-05"
+        iyz="-8.08E-06"
+        izz="0.0016007" />
     </inertial>
     <visual>
       <origin
@@ -423,7 +146,7 @@
     name="joint_2"
     type="revolute">
     <origin
-      xyz="-0.04068 0.2314 0"
+      xyz="-0.04098 0.2314 -0.0005"
       rpy="0 0 3.1416" />
     <parent
       link="link_1" />
@@ -434,24 +157,24 @@
     <limit
       lower="0"
       upper="3.4907"
-      effort="1.3918"
-      velocity="10.47" />
+      effort="3.92"
+      velocity="7.85" />
   </joint>
   <link
     name="link_3">
     <inertial>
       <origin
-        xyz="-0.0054771 -0.042366 5.33E-06"
+        xyz="-0.006126 -0.036115 1.5E-06"
         rpy="0 0 0" />
       <mass
-        value="0.0449" />
+        value="0.062" />
       <inertia
-        ixx="1.108E-05"
-        ixy="-5.3E-07"
+        ixx="1.368E-05"
+        ixy="-8.5E-07"
         ixz="0"
-        iyy="8.05E-06"
+        iyy="1.723E-05"
         iyz="0"
-        izz="1.301E-05" />
+        izz="2.059E-05" />
     </inertial>
     <visual>
       <origin
@@ -481,7 +204,7 @@
     name="joint_3"
     type="revolute">
     <origin
-      xyz="-0.04068 -0.24862 0"
+      xyz="-0.04098 -0.26861 0"
       rpy="0 0 0" />
     <parent
       link="link_2" />
@@ -492,24 +215,24 @@
     <limit
       lower="-2.6485"
       upper="2.6485"
-      effort="1.3918"
-      velocity="10.47" />
+      effort="2.75"
+      velocity="4.71" />
   </joint>
   <link
     name="link_4">
     <inertial>
       <origin
-        xyz="-3.369E-05 0.0017879 0.034604"
+        xyz="-2.05E-06 -0.001772 0.034507"
         rpy="0 0 0" />
       <mass
-        value="0.10644" />
+        value="0.11656" />
       <inertia
-        ixx="4.387E-05"
-        ixy="2E-08"
-        ixz="-9E-08"
-        iyy="0.0001819"
-        iyz="3.32E-06"
-        izz="0.00016517" />
+        ixx="5.463E-05"
+        ixy="0"
+        ixz="0"
+        iyy="0.00019496"
+        iyz="-3.64E-06"
+        izz="0.00017243" />
     </inertial>
     <visual>
       <origin
@@ -539,8 +262,8 @@
     name="joint_4"
     type="revolute">
     <origin
-      xyz="0 -0.059 0"
-      rpy="1.5708 -1.5708 0" />
+      xyz="0 -0.05189 0"
+      rpy="1.5708 1.5708 0" />
     <parent
       link="link_3" />
     <child
@@ -550,24 +273,24 @@
     <limit
       lower="-3.1416"
       upper="3.1416"
-      effort="1.3918"
+      effort="1.11"
       velocity="10.47" />
   </joint>
   <link
     name="link_5">
     <inertial>
       <origin
-        xyz="0 0 0.004453"
+        xyz="0 0 0.002665"
         rpy="0 0 0" />
       <mass
-        value="0.0069" />
+        value="0.0035" />
       <inertia
-        ixx="1.25E-06"
-        ixy="2.02E-06"
+        ixx="2.6E-07"
+        ixy="2.8E-07"
         ixz="0"
-        iyy="6.64E-06"
+        iyy="7.6E-07"
         iyz="0"
-        izz="7.82E-06" />
+        izz="1E-06" />
     </inertial>
     <visual>
       <origin
@@ -597,7 +320,7 @@
     name="joint_5"
     type="revolute">
     <origin
-      xyz="0 0 0.0355"
+      xyz="0 0 0.037"
       rpy="0 0 0" />
     <parent
       link="link_4" />
@@ -608,24 +331,24 @@
     <limit
       lower="-1.723"
       upper="0"
-      effort="1.3918"
+      effort="1.11"
       velocity="10.47" />
   </joint>
   <link
     name="gripper_left">
     <inertial>
       <origin
-        xyz="-3.81E-06 -0.019442 -0.00068794"
+        xyz="0.0091857 -0.0057172 0.0081891"
         rpy="0 0 0" />
       <mass
-        value="0.02118" />
+        value="0.02254" />
       <inertia
-        ixx="1.038E-05"
-        ixy="2.5E-07"
-        ixz="3E-08"
-        iyy="3.04E-06"
-        iyz="-9.2E-07"
-        izz="1.231E-05" />
+        ixx="1.288E-05"
+        ixy="-5E-07"
+        ixz="3.1E-07"
+        iyy="3.74E-06"
+        iyz="-1.5E-07"
+        izz="1.483E-05" />
     </inertial>
     <visual>
       <origin
@@ -655,10 +378,10 @@
     name="joint_gripper_left"
     type="prismatic">
     <origin
-      xyz="-0.05175 0 0.0602"
-      rpy="-1.5708 0 1.5708" />
+      xyz="0.04225 0.00825 0.0359"
+      rpy="-1.5708 0 -1.5708" />
     <parent
-      link="link_4" />
+      link="link_5" />
     <child
       link="gripper_left" />
     <axis
@@ -667,23 +390,23 @@
       lower="-0.04225"
       upper="0"
       effort="49.06"
-      velocity="0.0297" />
+      velocity="0.03" />
   </joint>
   <link
     name="gripper_right">
     <inertial>
       <origin
-        xyz="-3.81E-06 -0.01944152 0.00068794"
+        xyz="-0.0071038 -0.009438 0.0079063"
         rpy="0 0 0" />
       <mass
-        value="0.02118" />
+        value="0.01854" />
       <inertia
-        ixx="1.038E-05"
-        ixy="2.5E-07"
-        ixz="-3E-08"
-        iyy="3.04E-06"
-        iyz="6.4E-07"
-        izz="1.231E-05" />
+        ixx="1.132E-05"
+        ixy="-1.08E-06"
+        ixz="2.4E-07"
+        iyy="3.58E-06"
+        iyz="-4E-08"
+        izz="1.33E-05" />
     </inertial>
     <visual>
       <origin
@@ -713,22 +436,242 @@
     name="joint_gripper_right"
     type="prismatic">
     <origin
-      xyz="0.05175 0 0.0602"
+      xyz="-0.04225 0.00825 0.0359"
       rpy="-1.5708 0 1.5708" />
     <parent
-      link="link_4" />
+      link="link_5" />
     <child
       link="gripper_right" />
     <axis
       xyz="0 0 1" />
     <limit
-      lower="0"
-      upper="0.04225"
+      lower="-0.04225"
+      upper="0"
       effort="49.06"
-      velocity="0.0297" />
-    <mimic
-      joint="joint_gripper_left"
-      multiplier="-1"
-      offset="0" />
+      velocity="0.03" />
+  </joint>
+  <link
+    name="rotor_1">
+    <inertial>
+      <origin
+        xyz="0 0 0.0062143"
+        rpy="0 0 0" />
+      <mass
+        value="0.012" />
+      <inertia
+        ixx="3.071E-05"
+        ixy="-2.857E-05"
+        ixz="0"
+        iyy="2.734E-05"
+        iyz="0"
+        izz="5.789E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://x500_arm2x/meshes/rotor_1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://x500_arm2x/meshes/rotor_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint_rotor_1"
+    type="continuous">
+    <origin
+      xyz="0.17688 -0.17688 0.0153"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="rotor_1" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      effort="0.18"
+      velocity="1032.2" />
+  </joint>
+  <link
+    name="rotor_2">
+    <inertial>
+      <origin
+        xyz="0 0 0.0062143"
+        rpy="0 0 0" />
+      <mass
+        value="0.012" />
+      <inertia
+        ixx="3.071E-05"
+        ixy="-2.857E-05"
+        ixz="0"
+        iyy="2.734E-05"
+        iyz="0"
+        izz="5.789E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://x500_arm2x/meshes/rotor_2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://x500_arm2x/meshes/rotor_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint_rotor_2"
+    type="continuous">
+    <origin
+      xyz="-0.17688 0.17688 0.0153"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="rotor_2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      effort="0.18"
+      velocity="1032.2" />
+  </joint>
+  <link
+    name="rotor_3">
+    <inertial>
+      <origin
+        xyz="0 0 0.0062122"
+        rpy="0 0 0" />
+      <mass
+        value="0.012" />
+      <inertia
+        ixx="3.073E-05"
+        ixy="2.859E-05"
+        ixz="0"
+        iyy="2.736E-05"
+        iyz="0"
+        izz="5.793E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://x500_arm2x/meshes/rotor_3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://x500_arm2x/meshes/rotor_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint_rotor_3"
+    type="continuous">
+    <origin
+      xyz="0.17688 0.17688 0.0153"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="rotor_3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      effort="0.18"
+      velocity="1032.2" />
+  </joint>
+  <link
+    name="rotor_4">
+    <inertial>
+      <origin
+        xyz="0 0 0.0062122"
+        rpy="0 0 0" />
+      <mass
+        value="0.012" />
+      <inertia
+        ixx="3.073E-05"
+        ixy="2.859E-05"
+        ixz="0"
+        iyy="2.736E-05"
+        iyz="0"
+        izz="5.793E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://x500_arm2x/meshes/rotor_4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://x500_arm2x/meshes/rotor_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint_rotor_4"
+    type="continuous">
+    <origin
+      xyz="-0.17688 -0.17688 0.0153"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="rotor_4" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      effort="0.18"
+      velocity="1032.18" />
   </joint>
 </robot>
