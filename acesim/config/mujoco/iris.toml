@@ -7,7 +7,6 @@ rolling_moment_coeff = 1e-06
 time_constant_up = 0.0125
 time_constant_down = 0.025
 max_rot_velocity = 1100.0
-max_relative_airspeed_mps = 25.0
 rotor_radius = 0.128
 
 [params.px4_fusion]

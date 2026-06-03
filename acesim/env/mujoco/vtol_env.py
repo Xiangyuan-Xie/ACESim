@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.fw_env import FWEnv
-from acesim.utils.dynamics import axial_inflow_scale, first_order_response_step, idle_visual_speed_target
+from acesim.utils.dynamics import LumpedDragParams, first_order_response_step, idle_visual_speed_target
 
 
 @dataclass
@@ -25,7 +25,6 @@ class VTOLElectricLiftParams:
     time_constant_up: float
     time_constant_down: float
     max_rot_velocity: float
-    max_relative_airspeed_mps: float
     idle_visual_speed: float = 120.0
     low_speed_blend_end: float = 180.0
     visual_speed_smoothing_tc: float = 0.02
@@ -46,8 +45,8 @@ class VTOLEnv(FWEnv):
             time_constant_up=float(config.get("time_constant_up", 0.0125)),
             time_constant_down=float(config.get("time_constant_down", 0.025)),
             max_rot_velocity=float(config.get("max_rot_velocity", 1500.0)),
-            max_relative_airspeed_mps=float(config.get("max_relative_airspeed_mps", 50.0)),
         )
+        self._lumped_drag_params = LumpedDragParams.from_config(config.get("lumped_drag"))
         self._lift_rotor_indices = list(config.get("lift_rotor_indices", [0, 1, 2, 3]))
         self._puller_rotor_index = int(config.get("puller_rotor_index", 4))
         self._tilt_joint_names = list(config.get("tilt_joint_names", []))
@@ -151,6 +150,7 @@ class VTOLEnv(FWEnv):
         rotor_positions_w = np.zeros((len(self._lift_rotor_indices), 3), dtype=float)
         rotor_force_w = np.zeros_like(rotor_positions_w)
         rotor_moment_w = np.zeros_like(rotor_positions_w)
+        wind_w = self._get_wind_velocity_w()
         for i, body_id in enumerate(self._lift_rotor_body_ids):
             rotor_positions_w[i] = (
                 self._mj_data.site_xpos[self._lift_rotor_site_ids[i]].copy()
@@ -159,7 +159,8 @@ class VTOLEnv(FWEnv):
             )
             r_off_w = rotor_positions_w[i] - base_pos
             v_point_w = v_com_w + np.cross(omega_w, r_off_w)
-            v_point_r = rb_inv.apply(v_point_w)
+            v_air_point_w = v_point_w - wind_w
+            v_point_r = rb_inv.apply(v_air_point_w)
             rotor_axis_w = Rotation.from_quat(self._mj_data.xquat[body_id].copy(), scalar_first=True).apply(
                 np.array([0.0, 0.0, 1.0], dtype=float)
             )
@@ -170,8 +171,6 @@ class VTOLEnv(FWEnv):
             omega = self._lift_rotor_angular_velocity[i]
             omega_abs = abs(omega)
             thrust = abs(self._lift_params.motor_constant * omega * omega_abs)
-            v_axial = float(np.dot(v_point_r, rotor_axis_r))
-            thrust *= axial_inflow_scale(v_axial, self._lift_params.max_relative_airspeed_mps)
             direction = self._lift_rotor_direction[i]
             torque_axis_r = -direction * thrust * self._lift_params.moment_constant * rotor_axis_r
             f_drag_r = -self._lift_params.rotor_drag_coeff * omega_abs * v_perp_r
@@ -205,6 +204,7 @@ class VTOLEnv(FWEnv):
             omega_w,
         )
         self._apply_world_wrenches(rotor_positions_w, rotor_force_w, rotor_moment_w)
+        self._apply_lumped_drag_wrench(base_pos, rb, rb_inv, v_com_w)
 
     def _compute_visual_lift_rotor_speed(self, rotor_idx: int, armed: bool) -> float:
         physical_speed = max(0.0, float(self._lift_rotor_angular_velocity[rotor_idx]))

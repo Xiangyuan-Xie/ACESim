@@ -9,7 +9,7 @@ from scipy.spatial.transform import Rotation
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.px4_mj_env import PX4MJEnv
-from acesim.utils.dynamics import axial_inflow_scale, first_order_response_step, idle_visual_speed_target
+from acesim.utils.dynamics import LumpedDragParams, first_order_response_step, idle_visual_speed_target
 
 
 @dataclass
@@ -25,7 +25,6 @@ class MCParams:
     time_constant_up: float
     time_constant_down: float
     max_rot_velocity: float
-    max_relative_airspeed_mps: float
     idle_visual_speed: float = 120.0
     low_speed_blend_end: float = 180.0
     visual_speed_smoothing_tc: float = 0.02
@@ -46,8 +45,8 @@ class MCEnv(PX4MJEnv):
             time_constant_up=float(config.get("time_constant_up")),
             time_constant_down=float(config.get("time_constant_down")),
             max_rot_velocity=float(config.get("max_rot_velocity")),
-            max_relative_airspeed_mps=float(config.get("max_relative_airspeed_mps")),
         )
+        self._lumped_drag_params = LumpedDragParams.from_config(config.get("lumped_drag"))
         super().__init__(config_loader)
 
     def _initialize_vehicle_handles(self) -> None:
@@ -105,12 +104,14 @@ class MCEnv(PX4MJEnv):
         rotor_thrusts = np.zeros(self._rotor_count)
         rotor_force_w = np.zeros((self._rotor_count, 3))
         rotor_moment_w = np.zeros((self._rotor_count, 3))
+        wind_w = self._get_wind_velocity_w()
         for i in range(self._rotor_count):
             r_off_w = rb.apply(self._rotor_offsets[i])
             pos_w = base_pos + r_off_w
             rotor_positions_w[i] = pos_w
             v_point_w = v_com_w + np.cross(omega_w, r_off_w)
-            v_point_r = rb_inv.apply(v_point_w)
+            v_air_point_w = v_point_w - wind_w
+            v_point_r = rb_inv.apply(v_air_point_w)
             rotor_axis_w = Rotation.from_quat(
                 self._mj_data.xquat[self._rotor_body_ids[i]].copy(), scalar_first=True
             ).apply(np.array([0.0, 0.0, 1.0], dtype=float))
@@ -124,7 +125,6 @@ class MCEnv(PX4MJEnv):
             direction = self._rotor_direction[i]
 
             thrust = abs(self._params.motor_constant * omega * omega_abs)
-            thrust *= axial_inflow_scale(v_axial, self._params.max_relative_airspeed_mps)
             rotor_thrusts[i] = thrust
 
             torque_axis_r = -direction * thrust * self._params.moment_constant * rotor_axis_r
@@ -153,6 +153,7 @@ class MCEnv(PX4MJEnv):
             base_pos, rb, rb_inv, v_com_w, omega_w
         )
         self._apply_rotor_wrenches(rotor_positions_w, rotor_force_w, rotor_moment_w)
+        self._apply_lumped_drag_wrench(base_pos, rb, rb_inv, v_com_w)
 
     def _compute_visual_rotor_speed(self, rotor_idx: int, armed: bool) -> float:
         physical_speed = max(0.0, float(self._rotor_angular_velocity[rotor_idx]))

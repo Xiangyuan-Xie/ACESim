@@ -85,5 +85,4 @@ rolling_moment_coeff = 1e-06
 time_constant_up = 0.0125
 time_constant_down = 0.025
 max_rot_velocity = 1500.0
-max_relative_airspeed_mps = 50.0
 puller_rotor_index = 4

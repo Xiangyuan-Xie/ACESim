@@ -4,10 +4,36 @@ import unittest
 
 import numpy as np
 
-from acesim.utils.dynamics import axial_inflow_scale, first_order_response_step, idle_visual_speed_target
+from acesim.utils.dynamics import LumpedDragParams, first_order_response_step, idle_visual_speed_target
 
 
 class DynamicsUtilsTests(unittest.TestCase):
+    def test_lumped_drag_params_default_to_disabled_zero_drag(self) -> None:
+        params = LumpedDragParams.from_config(None)
+
+        self.assertFalse(params.enabled)
+        np.testing.assert_allclose(params.d, np.zeros(3, dtype=float))
+
+    def test_lumped_drag_params_parse_mass_normalized_config(self) -> None:
+        params = LumpedDragParams.from_config(
+            {
+                "enabled": True,
+                "units": "mass_normalized",
+                "D": [0.20, 0.10, 0.00],
+            }
+        )
+
+        self.assertTrue(params.enabled)
+        np.testing.assert_allclose(params.d, np.array([0.20, 0.10, 0.00], dtype=float))
+
+    def test_lumped_drag_params_reject_unsupported_units(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported lumped_drag units"):
+            LumpedDragParams.from_config({"enabled": True, "units": "raw", "D": [0.20, 0.10, 0.00]})
+
+    def test_lumped_drag_params_require_three_diagonal_coefficients(self) -> None:
+        with self.assertRaisesRegex(ValueError, "lumped_drag D must contain exactly three"):
+            LumpedDragParams.from_config({"enabled": True, "units": "mass_normalized", "D": [0.20, 0.10]})
+
     def test_first_order_response_step_uses_up_time_constant_for_spin_up(self) -> None:
         updated = first_order_response_step(
             current=np.array([0.0, 10.0], dtype=float),
@@ -75,12 +101,6 @@ class DynamicsUtilsTests(unittest.TestCase):
             ),
             500.0,
         )
-
-    def test_axial_inflow_scale_uses_signed_velocity_and_limits_boost(self) -> None:
-        self.assertEqual(axial_inflow_scale(0.0, 25.0), 1.0)
-        self.assertEqual(axial_inflow_scale(12.5, 25.0), 0.5)
-        self.assertEqual(axial_inflow_scale(-12.5, 25.0), 1.25)
-        self.assertEqual(axial_inflow_scale(50.0, 25.0), 0.0)
 
 
 if __name__ == "__main__":

@@ -652,7 +652,7 @@ class X500Arm2xBenchmarkController:
         from pymavlink import mavutil
 
         controller = case.controller if isinstance(case, ControllerCase) else "am"
-        isolation = self._isolation
+        isolation = getattr(self, "_isolation", None) or _default_isolation(0, self._config)
         mav = mavutil.mavlink_connection(
             isolation.mavlink_url,
             source_system=MAVLINK_SOURCE_SYSTEM,

@@ -354,6 +354,35 @@ class PX4MJEnv(MJEnv):
                 self._mj_data.qfrc_applied,
             )
 
+    def _get_wind_velocity_w(self) -> np.ndarray:
+        return self._mj_model.opt.wind.copy()
+
+    def _compute_lumped_drag_force_w(
+        self,
+        rb: Rotation,
+        rb_inv: Rotation,
+        v_com_w: np.ndarray,
+    ) -> np.ndarray:
+        params = getattr(self, "_lumped_drag_params", None)
+        if params is None or not params.enabled:
+            return np.zeros(3, dtype=float)
+        mass = float(np.sum(self._mj_model.body_mass))
+        v_air_com_w = np.asarray(v_com_w, dtype=float) - self._get_wind_velocity_w()
+        v_air_com_b = rb_inv.apply(v_air_com_w)
+        force_b = -mass * params.d * v_air_com_b
+        return rb.apply(force_b)
+
+    def _apply_lumped_drag_wrench(
+        self, base_pos: np.ndarray, rb: Rotation, rb_inv: Rotation, v_com_w: np.ndarray
+    ) -> None:
+        force_w = self._compute_lumped_drag_force_w(rb, rb_inv, v_com_w)
+        if np.any(force_w):
+            self._apply_world_wrenches(
+                np.asarray([base_pos], dtype=float),
+                np.asarray([force_w], dtype=float),
+                np.zeros((1, 3), dtype=float),
+            )
+
     def _actuator_channel_count(self) -> int:
         raise NotImplementedError
 

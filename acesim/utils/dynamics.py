@@ -7,24 +7,32 @@ into the utility layer.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TypeVar
 
 import numpy as np
 
 ArrayLikeFloat = TypeVar("ArrayLikeFloat", float, np.ndarray)
 
-AXIAL_INFLOW_SCALE_MAX = 1.25
 
+@dataclass(frozen=True)
+class LumpedDragParams:
+    """Mass-normalized diagonal linear body drag parameters."""
 
-def axial_inflow_scale(v_axial: float, max_relative_airspeed_mps: float) -> float:
-    """Return the signed axial inflow thrust scale for a rotor axis.
+    enabled: bool
+    d: np.ndarray
 
-    Positive axial velocity means the vehicle moves along the thrust axis, which
-    reduces available thrust. Negative axial velocity increases thrust up to a
-    bounded scale so the simple model stays numerically tame.
-    """
-
-    return float(np.clip(1.0 - v_axial / max(max_relative_airspeed_mps, 1e-6), 0.0, AXIAL_INFLOW_SCALE_MAX))
+    @classmethod
+    def from_config(cls, config: dict[str, object] | None) -> "LumpedDragParams":
+        if not config:
+            return cls(enabled=False, d=np.zeros(3, dtype=float))
+        units = str(config.get("units", "mass_normalized"))
+        if units != "mass_normalized":
+            raise ValueError(f"Unsupported lumped_drag units '{units}'. Expected 'mass_normalized'.")
+        d = np.asarray(config.get("D", [0.0, 0.0, 0.0]), dtype=float)
+        if d.shape != (3,):
+            raise ValueError("lumped_drag D must contain exactly three diagonal coefficients")
+        return cls(enabled=bool(config.get("enabled", False)), d=d)
 
 
 def first_order_response_step(

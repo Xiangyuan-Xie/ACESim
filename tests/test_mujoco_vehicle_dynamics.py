@@ -108,20 +108,21 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
     def test_multicopter_motor_response_maps_controls_to_first_order_rotor_speed(self) -> None:
         env = MCEnv(ConfigLoader(_config_path("default")))
         try:
-            controls = np.array([1.0, 0.5, -0.25, 1.2], dtype=float)
+            controls = np.array([1.0, 0.25, -0.25, 1.2], dtype=float)
             env._handle_applied_actuator_controls(controls)
 
-            expected_controls = np.array([1.0, 0.5, 0.0, 1.0], dtype=float)
+            expected_controls = np.array([1.0, 0.25, 0.0, 1.0], dtype=float)
+            expected_speed_targets = expected_controls * env._params.max_rot_velocity
             np.testing.assert_allclose(env._applied_actuator_controls, expected_controls)
             np.testing.assert_allclose(
                 env._desired_rotor_angular_velocity,
-                expected_controls * env._params.max_rot_velocity,
+                expected_speed_targets,
             )
 
             env._update_rotor_speed_state(0.01)
             expected_spin_up = first_order_response_step(
                 np.zeros(env._rotor_count, dtype=float),
-                expected_controls * env._params.max_rot_velocity,
+                expected_speed_targets,
                 0.01,
                 env._params.time_constant_up,
                 env._params.time_constant_down,
@@ -165,7 +166,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         finally:
             env.close()
 
-    def test_multicopter_signed_axial_inflow_reduces_and_boosts_thrust(self) -> None:
+    def test_multicopter_axial_velocity_does_not_scale_rotor_thrust(self) -> None:
         env = MCEnv(ConfigLoader(_config_path("default")))
         try:
             self._seed_kinematics(env, pos=np.array([0.0, 0.0, 1.0]), linvel=np.zeros(3))
@@ -180,7 +181,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
                 np.zeros(3, dtype=float),
             )
-            axial_speed = 0.5 * env._params.max_relative_airspeed_mps
+            axial_speed = 12.5
             _, up_thrusts, _, _ = env._compute_rotor_wrenches(
                 base_pos,
                 rb,
@@ -196,8 +197,69 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
             )
 
-            np.testing.assert_allclose(up_thrusts, baseline_thrusts * 0.5)
-            np.testing.assert_allclose(down_thrusts, baseline_thrusts * 1.25)
+            np.testing.assert_allclose(up_thrusts, baseline_thrusts)
+            np.testing.assert_allclose(down_thrusts, baseline_thrusts)
+        finally:
+            env.close()
+
+    def test_multicopter_linear_speed_command_produces_quadratic_thrust_at_steady_state(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            self._seed_kinematics(env, pos=np.array([0.0, 0.0, 1.0]), linvel=np.zeros(3))
+            actuator_output = 0.25
+            env._handle_applied_actuator_controls(np.full(env._rotor_count, actuator_output, dtype=float))
+            env._update_rotor_speed_state(1.0)
+
+            _, rotor_thrusts, _, _ = env._compute_rotor_wrenches(
+                np.array([0.0, 0.0, 1.0], dtype=float),
+                Rotation.identity(),
+                Rotation.identity(),
+                np.zeros(3, dtype=float),
+                np.zeros(3, dtype=float),
+            )
+
+            expected_thrust = actuator_output**2 * env._params.motor_constant * env._params.max_rot_velocity**2
+            np.testing.assert_allclose(rotor_thrusts, expected_thrust)
+        finally:
+            env.close()
+
+    def test_multicopter_lumped_drag_uses_body_frame_mass_normalized_coefficients(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            mass = float(np.sum(env._mj_model.body_mass))
+            rb = Rotation.from_euler("z", 90.0, degrees=True)
+            rb_inv = rb.inv()
+            velocity_w = rb.apply(np.array([2.0, -3.0, 4.0], dtype=float))
+            wind_w = rb.apply(np.array([0.5, 1.0, -2.0], dtype=float))
+            env._mj_model.opt.wind[:] = wind_w
+            force_w = env._compute_lumped_drag_force_w(rb, rb_inv, velocity_w)
+
+            expected_velocity_b = np.array([1.5, -4.0, 6.0], dtype=float)
+            expected_force_b = -mass * np.array([0.20, 0.20, 0.00], dtype=float) * expected_velocity_b
+            np.testing.assert_allclose(force_w, rb.apply(expected_force_b), atol=1e-12)
+            np.testing.assert_allclose(
+                env._compute_lumped_drag_force_w(rb, rb_inv, wind_w),
+                np.zeros(3, dtype=float),
+                atol=1e-12,
+            )
+        finally:
+            env.close()
+
+    def test_multicopter_apply_lumped_drag_wrench_adds_force_without_direct_moment(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            base_pos = np.array([0.0, 0.0, 1.0], dtype=float)
+            velocity_w = np.array([2.0, 0.0, 0.0], dtype=float)
+            env._mj_model.opt.wind[:] = np.array([0.5, 0.0, 0.0], dtype=float)
+            with patch("acesim.env.mujoco.px4_mj_env.mujoco.mj_applyFT") as apply_ft:
+                env._apply_lumped_drag_wrench(base_pos, Rotation.identity(), Rotation.identity(), velocity_w)
+
+            apply_ft.assert_called_once()
+            _, _, force_w, moment_w, point_w, body_id, _ = apply_ft.call_args.args
+            self.assertLess(float(force_w[0]), 0.0)
+            np.testing.assert_allclose(moment_w, np.zeros(3, dtype=float), atol=1e-12)
+            np.testing.assert_allclose(point_w, base_pos, atol=1e-12)
+            self.assertEqual(body_id, env._base_link_id)
         finally:
             env.close()
 
@@ -209,6 +271,9 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             base_pos = np.array([0.0, 0.0, 1.0], dtype=float)
             rb = Rotation.identity()
             lateral_velocity = np.array([3.0, -2.0, 0.0], dtype=float)
+            wind_w = np.array([1.0, -0.5, 0.0], dtype=float)
+            env._mj_model.opt.wind[:] = wind_w
+            relative_lateral_velocity = lateral_velocity - wind_w
 
             _, baseline_thrusts, _, _ = env._compute_rotor_wrenches(
                 base_pos,
@@ -226,13 +291,13 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             )
 
             np.testing.assert_allclose(lateral_thrusts, baseline_thrusts)
-            expected_drag = -env._params.rotor_drag_coeff * 500.0 * lateral_velocity
+            expected_drag = -env._params.rotor_drag_coeff * 500.0 * relative_lateral_velocity
             np.testing.assert_allclose(
                 lateral_force_w[:, :2],
                 np.tile(expected_drag[:2], (env._rotor_count, 1)),
                 atol=1e-12,
             )
-            self.assertTrue(np.all(lateral_force_w[:, :2] @ lateral_velocity[:2] < 0.0))
+            self.assertTrue(np.all(lateral_force_w[:, :2] @ relative_lateral_velocity[:2] < 0.0))
             np.testing.assert_allclose(lateral_force_w[:, 2], baseline_thrusts)
         finally:
             env.close()
@@ -293,6 +358,15 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         try:
             self._seed_kinematics(env, pos=np.array([0.0, 0.0, 0.9]), linvel=np.zeros(3))
 
+            env._handle_applied_actuator_controls(
+                np.array([0.25, 1.0, -0.5, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
+            )
+            expected_lift_controls = np.array([0.25, 1.0, 0.0, 1.0], dtype=float)
+            np.testing.assert_allclose(
+                env._desired_lift_rotor_angular_velocity,
+                expected_lift_controls * env._lift_params.max_rot_velocity,
+            )
+
             env._handle_applied_actuator_controls(np.array([1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float))
             env._update_lift_rotor_speed_state(1.0)
             base_pos, _, rb, rb_inv, v_com_w, _, omega_w = env._get_base_kinematics()
@@ -312,7 +386,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
                 np.zeros(3, dtype=float),
             )
-            axial_speed = 0.5 * env._lift_params.max_relative_airspeed_mps
+            axial_speed = 12.5
             _, up_force_w, _ = env._compute_lift_rotor_wrenches(
                 base_pos,
                 rb,
@@ -327,11 +401,31 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 -lift_axis_w * axial_speed,
                 np.zeros(3, dtype=float),
             )
-            self.assertLess(float(np.dot(up_force_w[0], lift_axis_w)), float(np.dot(baseline_force_w[0], lift_axis_w)))
-            self.assertGreater(
+            self.assertAlmostEqual(
+                float(np.dot(up_force_w[0], lift_axis_w)),
+                float(np.dot(baseline_force_w[0], lift_axis_w)),
+            )
+            self.assertAlmostEqual(
                 float(np.dot(down_force_w[0], lift_axis_w)),
                 float(np.dot(baseline_force_w[0], lift_axis_w)),
             )
+
+            lift_wind_w = np.array([1.5, -0.5, 0.0], dtype=float)
+            lift_velocity_w = np.array([4.5, 1.0, 0.0], dtype=float)
+            env._mj_model.opt.wind[:] = lift_wind_w
+            _, wind_force_w, _ = env._compute_lift_rotor_wrenches(
+                base_pos,
+                rb,
+                rb_inv,
+                lift_velocity_w,
+                np.zeros(3, dtype=float),
+            )
+            expected_lift_drag = (
+                -env._lift_params.rotor_drag_coeff
+                * env._lift_rotor_angular_velocity[0]
+                * (lift_velocity_w - lift_wind_w)
+            )
+            np.testing.assert_allclose(wind_force_w[0, :2], expected_lift_drag[:2], atol=1e-12)
 
             self._seed_kinematics(env, pos=np.array([0.0, 0.0, 0.9]), linvel=np.array([18.0, 0.0, 0.0]))
             env._handle_applied_actuator_controls(
