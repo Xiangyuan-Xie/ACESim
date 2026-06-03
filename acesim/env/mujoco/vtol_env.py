@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.fw_env import FWEnv
-from acesim.utils.dynamics import first_order_response_step, idle_visual_speed_target
+from acesim.utils.dynamics import axial_inflow_scale, first_order_response_step, idle_visual_speed_target
 
 
 @dataclass
@@ -170,10 +170,8 @@ class VTOLEnv(FWEnv):
             omega = self._lift_rotor_angular_velocity[i]
             omega_abs = abs(omega)
             thrust = abs(self._lift_params.motor_constant * omega * omega_abs)
-            scalar = 1.0 - abs(float(np.dot(v_point_r, rotor_axis_r))) / max(
-                self._lift_params.max_relative_airspeed_mps, 1e-6
-            )
-            thrust *= float(np.clip(scalar, 0.0, 1.0))
+            v_axial = float(np.dot(v_point_r, rotor_axis_r))
+            thrust *= axial_inflow_scale(v_axial, self._lift_params.max_relative_airspeed_mps)
             direction = self._lift_rotor_direction[i]
             torque_axis_r = -direction * thrust * self._lift_params.moment_constant * rotor_axis_r
             f_drag_r = -self._lift_params.rotor_drag_coeff * omega_abs * v_perp_r

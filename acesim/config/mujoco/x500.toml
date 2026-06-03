@@ -1,14 +1,14 @@
 [params]
 rotor_direction = [1.0, 1.0, -1.0, -1.0]
-motor_constant = 8.54858e-06
-moment_constant = 0.016
+motor_constant = 1.22949e-05
+moment_constant = 0.0140363
 rotor_drag_coeff = 8.06428e-05
 rolling_moment_coeff = 1e-06
 time_constant_up = 0.0125
 time_constant_down = 0.025
-max_rot_velocity = 1000.0
+max_rot_velocity = 1032.2
 max_relative_airspeed_mps = 25.0
-rotor_radius = 0.1396153846153846
+rotor_radius = 0.127
 
 [params.px4_fusion]
 mode = "mocap"

@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from acesim.utils.dynamics import first_order_response_step, idle_visual_speed_target
+from acesim.utils.dynamics import axial_inflow_scale, first_order_response_step, idle_visual_speed_target
 
 
 class DynamicsUtilsTests(unittest.TestCase):
@@ -75,6 +75,12 @@ class DynamicsUtilsTests(unittest.TestCase):
             ),
             500.0,
         )
+
+    def test_axial_inflow_scale_uses_signed_velocity_and_limits_boost(self) -> None:
+        self.assertEqual(axial_inflow_scale(0.0, 25.0), 1.0)
+        self.assertEqual(axial_inflow_scale(12.5, 25.0), 0.5)
+        self.assertEqual(axial_inflow_scale(-12.5, 25.0), 1.25)
+        self.assertEqual(axial_inflow_scale(50.0, 25.0), 0.0)
 
 
 if __name__ == "__main__":

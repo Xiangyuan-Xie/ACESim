@@ -9,7 +9,7 @@ from scipy.spatial.transform import Rotation
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.px4_mj_env import PX4MJEnv
-from acesim.utils.dynamics import first_order_response_step, idle_visual_speed_target
+from acesim.utils.dynamics import axial_inflow_scale, first_order_response_step, idle_visual_speed_target
 
 
 @dataclass
@@ -111,24 +111,28 @@ class MCEnv(PX4MJEnv):
             rotor_positions_w[i] = pos_w
             v_point_w = v_com_w + np.cross(omega_w, r_off_w)
             v_point_r = rb_inv.apply(v_point_w)
-            v_parallel_r = np.array([0.0, 0.0, v_point_r[2]])
-            v_perp_r = v_point_r - v_parallel_r
+            rotor_axis_w = Rotation.from_quat(
+                self._mj_data.xquat[self._rotor_body_ids[i]].copy(), scalar_first=True
+            ).apply(np.array([0.0, 0.0, 1.0], dtype=float))
+            rotor_axis_r = rb_inv.apply(rotor_axis_w)
+            rotor_axis_r = rotor_axis_r / max(np.linalg.norm(rotor_axis_r), 1e-12)
+            v_axial = float(np.dot(v_point_r, rotor_axis_r))
+            v_perp_r = v_point_r - v_axial * rotor_axis_r
 
             omega = self._rotor_angular_velocity[i]
             omega_abs = abs(omega)
             direction = self._rotor_direction[i]
 
             thrust = abs(self._params.motor_constant * omega * omega_abs)
-            scalar = 1.0 - abs(v_parallel_r[2]) / max(self._params.max_relative_airspeed_mps, 1e-6)
-            thrust *= float(np.clip(scalar, 0.0, 1.0))
+            thrust *= axial_inflow_scale(v_axial, self._params.max_relative_airspeed_mps)
             rotor_thrusts[i] = thrust
 
-            torque_z_r = -direction * thrust * self._params.moment_constant
+            torque_axis_r = -direction * thrust * self._params.moment_constant * rotor_axis_r
             f_drag_r = -self._params.rotor_drag_coeff * omega_abs * v_perp_r
             m_rolling_r = -self._params.rolling_moment_coeff * omega_abs * direction * v_perp_r
 
-            rotor_force_w[i] = rb.apply(np.array([0.0, 0.0, thrust]) + f_drag_r)
-            rotor_moment_w[i] = rb.apply(np.array([0.0, 0.0, torque_z_r]) + m_rolling_r)
+            rotor_force_w[i] = rb.apply(rotor_axis_r * thrust + f_drag_r)
+            rotor_moment_w[i] = rb.apply(torque_axis_r + m_rolling_r)
 
         return rotor_positions_w, rotor_thrusts, rotor_force_w, rotor_moment_w
 
