@@ -15,6 +15,26 @@ enabled = true
 units = "mass_normalized"
 D = [0.20, 0.20, 0.00]
 
+[params.rotor_flow]
+enabled = true
+advance_c_lambda = 0.0
+advance_c_mu = 0.0
+advance_scale_min = 0.85
+advance_scale_max = 1.10
+ground_effect_enabled = true
+ground_effect_max_scale = 1.25
+ground_effect_height_rotor_diameters = 1.0
+
+[params.downwash]
+enabled = true
+exclude_body_patterns = ["base_link", "rotor_*", "*_vis"]
+air_density = 1.225
+drag_coefficient = 1.1
+area_scale = 1.0
+wake_speed_scale = 1.0
+wake_spread_angle_rad = 0.20
+axial_decay_m = 0.45
+
 [params.px4_fusion]
 mode = "mocap"
 

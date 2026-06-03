@@ -4,7 +4,13 @@ import unittest
 
 import numpy as np
 
-from acesim.utils.dynamics import LumpedDragParams, first_order_response_step, idle_visual_speed_target
+from acesim.utils.dynamics import (
+    DownwashParams,
+    LumpedDragParams,
+    RotorFlowParams,
+    first_order_response_step,
+    idle_visual_speed_target,
+)
 
 
 class DynamicsUtilsTests(unittest.TestCase):
@@ -33,6 +39,97 @@ class DynamicsUtilsTests(unittest.TestCase):
     def test_lumped_drag_params_require_three_diagonal_coefficients(self) -> None:
         with self.assertRaisesRegex(ValueError, "lumped_drag D must contain exactly three"):
             LumpedDragParams.from_config({"enabled": True, "units": "mass_normalized", "D": [0.20, 0.10]})
+
+    def test_rotor_flow_params_default_to_disabled_no_correction(self) -> None:
+        params = RotorFlowParams.from_config(None)
+
+        self.assertFalse(params.enabled)
+        self.assertEqual(params.advance_c_mu, 0.0)
+        self.assertEqual(params.advance_scale_min, 1.0)
+        self.assertFalse(params.ground_effect_enabled)
+
+    def test_rotor_flow_params_parse_configured_defaults(self) -> None:
+        params = RotorFlowParams.from_config(
+            {
+                "enabled": True,
+                "advance_c_lambda": 0.0,
+                "advance_c_mu": 0.0,
+                "advance_scale_min": 0.85,
+                "advance_scale_max": 1.10,
+                "ground_effect_enabled": True,
+                "ground_effect_max_scale": 1.25,
+                "ground_effect_height_rotor_diameters": 1.0,
+            }
+        )
+
+        self.assertTrue(params.enabled)
+        self.assertAlmostEqual(params.advance_c_mu, 0.0)
+        self.assertAlmostEqual(params.advance_scale_min, 0.85)
+        self.assertTrue(params.ground_effect_enabled)
+        self.assertAlmostEqual(params.ground_effect_max_scale, 1.25)
+
+    def test_rotor_flow_params_reject_invalid_bounds(self) -> None:
+        invalid_configs: list[dict[str, object]] = [
+            {"advance_scale_min": float("inf")},
+            {"advance_scale_min": -0.1},
+            {"advance_scale_min": 1.2, "advance_scale_max": 1.1},
+            {"ground_effect_max_scale": 0.9},
+            {"ground_effect_height_rotor_diameters": -0.1},
+        ]
+
+        for config in invalid_configs:
+            with self.subTest(config=config):
+                with self.assertRaises(ValueError):
+                    RotorFlowParams.from_config(config)
+
+    def test_downwash_params_default_to_disabled_no_targets(self) -> None:
+        params = DownwashParams.from_config(None)
+
+        self.assertFalse(params.enabled)
+        self.assertEqual(params.exclude_body_patterns, ())
+        self.assertFalse(hasattr(params, "force_coeff"))
+        self.assertFalse(hasattr(params, "model"))
+
+    def test_downwash_params_parse_configured_exclusion_patterns(self) -> None:
+        params = DownwashParams.from_config(
+            {
+                "enabled": True,
+                "exclude_body_patterns": ["base_link", "rotor_*"],
+                "air_density": 1.225,
+                "drag_coefficient": 1.1,
+                "area_scale": 1.0,
+                "wake_speed_scale": 1.0,
+                "wake_spread_angle_rad": 0.20,
+                "axial_decay_m": 0.45,
+            }
+        )
+
+        self.assertTrue(params.enabled)
+        self.assertEqual(params.exclude_body_patterns, ("base_link", "rotor_*"))
+        self.assertAlmostEqual(params.air_density, 1.225)
+        self.assertAlmostEqual(params.drag_coefficient, 1.1)
+        self.assertAlmostEqual(params.area_scale, 1.0)
+        self.assertAlmostEqual(params.wake_speed_scale, 1.0)
+        self.assertAlmostEqual(params.wake_spread_angle_rad, 0.20)
+        self.assertAlmostEqual(params.axial_decay_m, 0.45)
+        self.assertFalse(hasattr(params, "force_coeff"))
+        self.assertFalse(hasattr(params, "model"))
+
+    def test_downwash_params_reject_nonphysical_coefficients(self) -> None:
+        invalid_configs: list[dict[str, object]] = [
+            {"air_density": 0.0},
+            {"air_density": float("nan")},
+            {"drag_coefficient": -0.1},
+            {"area_scale": -0.1},
+            {"wake_speed_scale": -0.1},
+            {"wake_spread_angle_rad": -0.1},
+            {"axial_decay_m": 0.0},
+        ]
+
+        for config in invalid_configs:
+            with self.subTest(config=config):
+                with self.assertRaises(ValueError):
+                    DownwashParams.from_config(config)
 
     def test_first_order_response_step_uses_up_time_constant_for_spin_up(self) -> None:
         updated = first_order_response_step(

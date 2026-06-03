@@ -14,6 +14,16 @@ enabled = true
 units = "mass_normalized"
 D = [0.20, 0.20, 0.00]
 
+[params.rotor_flow]
+enabled = true
+advance_c_lambda = 0.0
+advance_c_mu = 0.0
+advance_scale_min = 0.85
+advance_scale_max = 1.10
+ground_effect_enabled = true
+ground_effect_max_scale = 1.25
+ground_effect_height_rotor_diameters = 1.0
+
 [params.px4_fusion]
 mode = "mocap"
 
