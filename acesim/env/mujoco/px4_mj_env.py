@@ -39,6 +39,8 @@ class PX4MJEnv(MJEnv):
             self._visual_state_publisher = VehicleVisualStatePublisher(self._visual_stream_params)
             self._visual_publish_period_us = int(round(1_000_000.0 / self._visual_stream_params.rate_hz))
             self._next_visual_publish_time_us = 0
+            self._px4_connection_polled_this_step = False
+            self._interactive_viewer_mode = False
             self._initialize_px4_base_handles()
             self._initialize_vehicle_handles()
             self._sensor_scheduler = PX4SensorScheduler(
@@ -181,20 +183,25 @@ class PX4MJEnv(MJEnv):
         *,
         mocap_ids: Sequence[int],
         offsets_b: np.ndarray,
-        mount_rot: Sequence[Rotation],
+        mount_rot: Sequence[Rotation] | np.ndarray,
         rotor_angles: np.ndarray,
         visual_speeds: np.ndarray,
         target_speeds: np.ndarray,
         spin_directions: np.ndarray,
         spin_axes_local: np.ndarray,
         smoothing_tc: float,
+        base_pos: np.ndarray | None = None,
+        base_quat: np.ndarray | None = None,
+        rb_mat: np.ndarray | None = None,
     ) -> None:
         """Advance rotor/thruster mocap visuals without spinning physical rigid bodies."""
 
         if len(mocap_ids) == 0:
             return
 
-        base_pos, _, rb, _, _, _, _ = self._get_base_kinematics()
+        if base_pos is None or base_quat is None or rb_mat is None:
+            base_pos, base_quat, rb, _, _, _, _ = self._get_base_kinematics()
+            rb_mat = rb.as_matrix()
         dt_s = self._mj_model.opt.timestep
         axes = np.asarray(spin_axes_local, dtype=float)
         if axes.ndim == 1:
@@ -202,6 +209,10 @@ class PX4MJEnv(MJEnv):
         norms = np.linalg.norm(axes, axis=1, keepdims=True)
         norms = np.where(norms <= 1e-12, 1.0, norms)
         axes = axes / norms
+        if isinstance(mount_rot, np.ndarray):
+            mount_quats = mount_rot
+        else:
+            mount_quats = np.asarray([rot.as_quat(scalar_first=True) for rot in mount_rot], dtype=float)
 
         for i, mocap_id in enumerate(mocap_ids):
             if mocap_id < 0:
@@ -212,9 +223,33 @@ class PX4MJEnv(MJEnv):
             else:
                 visual_speeds[i] = float(target_speeds[i])
             rotor_angles[i] += float(visual_speeds[i] * spin_directions[i] * dt_s)
-            spin = Rotation.from_rotvec(axes[i] * rotor_angles[i])
-            self._mj_data.mocap_pos[mocap_id] = base_pos + rb.apply(offsets_b[i])
-            self._mj_data.mocap_quat[mocap_id] = (rb * mount_rot[i] * spin).as_quat(scalar_first=True)
+            half_angle = 0.5 * rotor_angles[i]
+            spin_quat = np.empty(4, dtype=float)
+            spin_quat[0] = np.cos(half_angle)
+            spin_quat[1:] = axes[i] * np.sin(half_angle)
+            wm, xm, ym, zm = mount_quats[i]
+            ws, xs, ys, zs = spin_quat
+            mount_spin = np.array(
+                [
+                    wm * ws - xm * xs - ym * ys - zm * zs,
+                    wm * xs + xm * ws + ym * zs - zm * ys,
+                    wm * ys - xm * zs + ym * ws + zm * xs,
+                    wm * zs + xm * ys - ym * xs + zm * ws,
+                ],
+                dtype=float,
+            )
+            wb, xb, yb, zb = base_quat
+            wm, xm, ym, zm = mount_spin
+            self._mj_data.mocap_pos[mocap_id] = base_pos + rb_mat @ offsets_b[i]
+            self._mj_data.mocap_quat[mocap_id] = np.array(
+                [
+                    wb * wm - xb * xm - yb * ym - zb * zm,
+                    wb * xm + xb * wm + yb * zm - zb * ym,
+                    wb * ym - xb * zm + yb * wm + zb * xm,
+                    wb * zm + xb * ym - yb * xm + zb * wm,
+                ],
+                dtype=float,
+            )
 
     def _get_sensor_raw(self, name: str) -> np.ndarray:
         sensor_id = self._sensor_id_map[name]
@@ -359,8 +394,8 @@ class PX4MJEnv(MJEnv):
 
     def _compute_lumped_drag_force_w(
         self,
-        rb: Rotation,
-        rb_inv: Rotation,
+        rb: Rotation | np.ndarray,
+        rb_inv: Rotation | np.ndarray,
         v_com_w: np.ndarray,
     ) -> np.ndarray:
         params = getattr(self, "_lumped_drag_params", None)
@@ -368,12 +403,12 @@ class PX4MJEnv(MJEnv):
             return np.zeros(3, dtype=float)
         mass = float(np.sum(self._mj_model.body_mass))
         v_air_com_w = np.asarray(v_com_w, dtype=float) - self._get_wind_velocity_w()
-        v_air_com_b = rb_inv.apply(v_air_com_w)
+        v_air_com_b = rb_inv @ v_air_com_w if isinstance(rb_inv, np.ndarray) else rb_inv.apply(v_air_com_w)
         force_b = -mass * params.d * v_air_com_b
-        return rb.apply(force_b)
+        return rb @ force_b if isinstance(rb, np.ndarray) else rb.apply(force_b)
 
     def _apply_lumped_drag_wrench(
-        self, base_pos: np.ndarray, rb: Rotation, rb_inv: Rotation, v_com_w: np.ndarray
+        self, base_pos: np.ndarray, rb: Rotation | np.ndarray, rb_inv: Rotation | np.ndarray, v_com_w: np.ndarray
     ) -> None:
         force_w = self._compute_lumped_drag_force_w(rb, rb_inv, v_com_w)
         if np.any(force_w):
@@ -391,7 +426,9 @@ class PX4MJEnv(MJEnv):
 
     def _update_px4_controls(self) -> None:
         channel_count = self._actuator_channel_count()
-        self._px4_transport.update_actuator_commands(self._simulation_time_us, channel_count)
+        has_new_controls = self._px4_transport.update_actuator_commands(self._simulation_time_us, channel_count)
+        if not has_new_controls:
+            return
         controls = self._px4_transport.read_applied_actuator_controls(channel_count)
         if controls is not None:
             self._handle_applied_actuator_controls(controls)
@@ -407,15 +444,22 @@ class PX4MJEnv(MJEnv):
 
     def _control(self, model: mujoco.MjModel, data: mujoco.MjData) -> None:
         self._step_count += 1
-        self._advance_simulation_time_seconds(model.opt.timestep)
+        self._px4_connection_polled_this_step = False
+        if self._interactive_viewer_mode:
+            self._simulation_time_us = int(round((data.time + model.opt.timestep) * 1_000_000.0))
         if not self._px4_transport.is_connected:
             self._px4_transport.update_connection_state()
+            self._px4_connection_polled_this_step = True
         else:
-            self._sensor_scheduler.update()
+            if self._interactive_viewer_mode:
+                self._sensor_scheduler.update()
             self._update_px4_controls()
             self._apply_vehicle_physics()
         self._update_custom_control()
         self._update_vehicle_visuals()
+        if self._interactive_viewer_mode:
+            self._publish_visual_state_if_due()
+            self._record_interactive_viewer_profile(data.time + model.opt.timestep)
 
     def _publish_visual_state_if_due(self) -> None:
         if not self._visual_state_publisher.is_enabled:
@@ -427,9 +471,21 @@ class PX4MJEnv(MJEnv):
 
     def step(self) -> None:
         super().step()
+        self._simulation_time_us = int(round(self._mj_data.time * 1_000_000.0))
+        is_connected = self._px4_transport.is_connected
+        if not is_connected and not self._px4_connection_polled_this_step:
+            is_connected = self._px4_transport.update_connection_state()
+        if is_connected:
+            self._sensor_scheduler.update()
         self._publish_visual_state_if_due()
 
     def close(self) -> None:
         self._px4_transport.close()
         self._visual_state_publisher.close()
         super().close()
+
+    def _before_interactive_viewer(self) -> None:
+        self._interactive_viewer_mode = True
+
+    def _after_interactive_viewer(self) -> None:
+        self._interactive_viewer_mode = False

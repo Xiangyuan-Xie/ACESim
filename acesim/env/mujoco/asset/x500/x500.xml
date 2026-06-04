@@ -4,10 +4,6 @@
   <option density="1.225" timestep="0.001" integrator="implicit" viscosity="1.8e-5" cone="elliptic" impratio="10" magnetic="2.73e-5 0 -4.54e-5" />
   <size njmax="500" nconmax="100" />
   <asset>
-    <mesh name="NXP-HGD-CF" file="NXP-HGD-CF.stl" />
-    <mesh name="1345_prop_ccw" file="1345_prop_ccw.stl" scale="0.846154 0.846154 0.846154" />
-    <mesh name="5010Bell" file="5010Bell.stl" />
-    <mesh name="1345_prop_cw" file="1345_prop_cw.stl" scale="0.846154 0.846154 0.846154" />
     <mesh name="x500_frame" file="NXP-HGD-CF.stl" />
     <mesh name="x500_motor_base" file="5010Base.stl" />
     <mesh name="x500_motor_bell" file="5010Bell.stl" />

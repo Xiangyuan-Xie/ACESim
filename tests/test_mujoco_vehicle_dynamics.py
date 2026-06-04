@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol, cast
 from unittest.mock import patch
 
 import mujoco
@@ -20,6 +20,8 @@ from acesim.env.mujoco.px4_mj_env import PX4MJEnv
 from acesim.env.mujoco.uuv_env import UUVEnv
 from acesim.env.mujoco.vtol_env import VTOLEnv
 from acesim.utils.dynamics import first_order_response_step
+from acesim.utils.px4_sensor_scheduler import PX4SensorSample
+from acesim.utils.simulation_clock import SimulationClock
 
 
 class _FakePX4Transport:
@@ -35,8 +37,8 @@ class _FakePX4Transport:
     def update_connection_state(self) -> bool:
         return False
 
-    def update_actuator_commands(self, sim_time_us: int, channel_count: int) -> None:
-        return None
+    def update_actuator_commands(self, sim_time_us: int, channel_count: int) -> bool:
+        return False
 
     def read_applied_actuator_controls(self, channel_count: int) -> None:
         return None
@@ -46,6 +48,61 @@ class _FakePX4Transport:
 
     def close(self) -> None:
         return None
+
+
+class _ConnectedFakePX4Transport(_FakePX4Transport):
+    events: list[str] = []
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.is_connected = True
+        self.update_times: list[int] = []
+        self.has_new_controls = True
+
+    def update_actuator_commands(self, sim_time_us: int, channel_count: int) -> bool:
+        self.update_times.append(int(sim_time_us))
+        self.__class__.events.append("actuator")
+        return self.has_new_controls
+
+
+class _ConnectsOnPostStepFakePX4Transport(_FakePX4Transport):
+    events: list[str] = []
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.connection_polls = 0
+
+    def update_connection_state(self) -> bool:
+        self.connection_polls += 1
+        if self.connection_polls == 1:
+            self.__class__.events.append("miss")
+            return False
+        self.is_connected = True
+        self.__class__.events.append("connect")
+        return True
+
+
+class _RecordingSensorScheduler:
+    instances: list["_RecordingSensorScheduler"] = []
+
+    def __init__(
+        self,
+        transport: object,
+        clock: SimulationClock,
+        params: object,
+        read_sensor_sample: Callable[[], PX4SensorSample],
+    ) -> None:
+        self.clock = clock
+        self.read_sensor_sample = read_sensor_sample
+        self.calls: list[tuple[int, np.ndarray]] = []
+        self.__class__.instances.append(self)
+
+    def update(self) -> bool:
+        sample = self.read_sensor_sample()
+        self.calls.append((int(self.clock.current_time_us), np.asarray(sample.position_world_m, dtype=float)))
+        _ConnectedFakePX4Transport.events.append("sensor")
+        _ConnectsOnPostStepFakePX4Transport.events.append("sensor")
+        return True
 
 
 class _FakeVisualPublisher:
@@ -133,6 +190,49 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         _set_sensor(env, "accel", np.array([0.0, 0.0, 9.81], dtype=float))
         _set_sensor(env, "mag", np.array([2.73e-5, 0.0, -4.54e-5], dtype=float))
 
+    def test_mujoco_run_uses_native_viewer_for_gui_responsiveness(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            with (
+                patch("acesim.env.mujoco.mj_env.mujoco.viewer.launch") as launch,
+                patch(
+                    "acesim.env.mujoco.mj_env.mujoco.viewer.launch_passive",
+                    side_effect=AssertionError("passive viewer loop should not be used for GUI"),
+                ),
+                patch.object(env, "_before_interactive_viewer", wraps=env._before_interactive_viewer) as before,
+                patch.object(env, "_after_interactive_viewer", wraps=env._after_interactive_viewer) as after,
+            ):
+                env.run()
+
+            launch.assert_called_once_with(env._mj_model, env._mj_data)
+            before.assert_called_once()
+            after.assert_called_once()
+            self.assertFalse(env._interactive_viewer_mode)
+        finally:
+            env.close()
+
+    def test_px4_interactive_viewer_mode_publishes_sensors_from_control_callback(self) -> None:
+        _RecordingSensorScheduler.instances.clear()
+        _ConnectedFakePX4Transport.events.clear()
+        with (
+            patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _ConnectedFakePX4Transport),
+            patch("acesim.env.mujoco.px4_mj_env.PX4SensorScheduler", _RecordingSensorScheduler),
+        ):
+            env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            scheduler = _RecordingSensorScheduler.instances[0]
+            env._mj_data.time = 0.123
+
+            env._before_interactive_viewer()
+            env._control(env._mj_model, env._mj_data)
+
+            self.assertEqual(len(scheduler.calls), 1)
+            self.assertEqual(scheduler.calls[0][0], 124000)
+            self.assertEqual(_ConnectedFakePX4Transport.events, ["sensor", "actuator"])
+        finally:
+            env._after_interactive_viewer()
+            env.close()
+
     def test_multicopter_motor_response_maps_controls_to_first_order_rotor_speed(self) -> None:
         env = MCEnv(ConfigLoader(_config_path("default")))
         try:
@@ -168,6 +268,120 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 env._params.time_constant_down,
             )
             np.testing.assert_allclose(env._rotor_angular_velocity, expected_spin_down)
+        finally:
+            env.close()
+
+    def test_px4_mujoco_sensor_scheduler_runs_after_mj_step_with_post_step_timestamp(self) -> None:
+        _RecordingSensorScheduler.instances.clear()
+        with (
+            patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _ConnectedFakePX4Transport),
+            patch("acesim.env.mujoco.px4_mj_env.PX4SensorScheduler", _RecordingSensorScheduler),
+        ):
+            env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            scheduler = _RecordingSensorScheduler.instances[0]
+
+            env.step()
+
+            self.assertEqual(len(scheduler.calls), 1)
+            expected_time_us = int(round(env._mj_data.time * 1_000_000.0))
+            self.assertEqual(scheduler.calls[0][0], expected_time_us)
+            self.assertEqual(env._simulation_time_us, expected_time_us)
+            np.testing.assert_allclose(scheduler.calls[0][1], env._get_sensor_raw("pos"))
+        finally:
+            env.close()
+
+    def test_px4_mujoco_actuator_polling_stays_inside_control_callback_before_post_step_sensor_publish(
+        self,
+    ) -> None:
+        _RecordingSensorScheduler.instances.clear()
+        _ConnectedFakePX4Transport.events.clear()
+        with (
+            patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _ConnectedFakePX4Transport),
+            patch("acesim.env.mujoco.px4_mj_env.PX4SensorScheduler", _RecordingSensorScheduler),
+        ):
+            env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            env.step()
+
+            transport = cast(_ConnectedFakePX4Transport, env._px4_transport)
+            self.assertIsInstance(transport, _ConnectedFakePX4Transport)
+            self.assertEqual(transport.update_times, [0])
+            self.assertEqual(len(_RecordingSensorScheduler.instances[0].calls), 1)
+            self.assertEqual(_ConnectedFakePX4Transport.events, ["actuator", "sensor"])
+        finally:
+            env.close()
+
+    def test_px4_mujoco_connection_polling_happens_at_most_once_per_step(self) -> None:
+        _RecordingSensorScheduler.instances.clear()
+        _ConnectsOnPostStepFakePX4Transport.events.clear()
+        with (
+            patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _ConnectsOnPostStepFakePX4Transport),
+            patch("acesim.env.mujoco.px4_mj_env.PX4SensorScheduler", _RecordingSensorScheduler),
+        ):
+            env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            env.step()
+
+            transport = cast(_ConnectsOnPostStepFakePX4Transport, env._px4_transport)
+            self.assertFalse(transport.is_connected)
+            self.assertEqual(transport.connection_polls, 1)
+            self.assertEqual(len(_RecordingSensorScheduler.instances[0].calls), 0)
+            self.assertEqual(_ConnectsOnPostStepFakePX4Transport.events, ["miss"])
+
+            env.step()
+
+            self.assertTrue(transport.is_connected)
+            self.assertEqual(transport.connection_polls, 2)
+            self.assertEqual(len(_RecordingSensorScheduler.instances[0].calls), 1)
+            self.assertEqual(_ConnectsOnPostStepFakePX4Transport.events, ["miss", "connect", "sensor"])
+        finally:
+            env.close()
+
+    def test_px4_mujoco_visual_rotor_updates_on_every_control_callback(self) -> None:
+        with patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _ConnectedFakePX4Transport):
+            env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            with patch.object(env, "_update_vehicle_visuals", wraps=env._update_vehicle_visuals) as update_mock:
+                env._control(env._mj_model, env._mj_data)
+                env._control(env._mj_model, env._mj_data)
+                env._control(env._mj_model, env._mj_data)
+
+            self.assertEqual(update_mock.call_count, 3)
+        finally:
+            env.close()
+
+    def test_visual_rotor_fast_path_matches_rotation_composition(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            self._seed_kinematics(env, pos=np.array([0.1, -0.2, 1.0]), linvel=np.zeros(3))
+            base_pos = env._get_sensor_raw("pos")
+            base_quat = env._get_sensor_raw("quat")
+            rb = Rotation.from_quat(base_quat, scalar_first=True)
+            mocap_id = next(mocap_id for mocap_id in env._rotor_mocap_ids if mocap_id >= 0)
+            rotor_idx = env._rotor_mocap_ids.index(mocap_id)
+            target_speeds = np.zeros(env._rotor_count, dtype=float)
+            target_speeds[rotor_idx] = 321.0
+            env._advance_visual_rotors(
+                mocap_ids=env._rotor_mocap_ids,
+                offsets_b=env._rotor_visual_offsets,
+                mount_rot=env._rotor_mount_rot,
+                rotor_angles=env._rotor_angle,
+                visual_speeds=env._visual_rotor_angular_velocity,
+                target_speeds=target_speeds,
+                spin_directions=env._rotor_direction,
+                spin_axes_local=np.array([0.0, 0.0, 1.0], dtype=float),
+                smoothing_tc=0.0,
+            )
+
+            spin = Rotation.from_rotvec(np.array([0.0, 0.0, env._rotor_angle[rotor_idx]], dtype=float))
+            expected_quat = (rb * env._rotor_mount_rot[rotor_idx] * spin).as_quat(scalar_first=True)
+            np.testing.assert_allclose(
+                env._mj_data.mocap_pos[mocap_id],
+                base_pos + rb.apply(env._rotor_visual_offsets[rotor_idx]),
+                atol=1e-12,
+            )
+            np.testing.assert_allclose(env._mj_data.mocap_quat[mocap_id], expected_quat, atol=1e-12)
         finally:
             env.close()
 
@@ -209,6 +423,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
                 np.zeros(3, dtype=float),
             )
+            baseline_thrusts = baseline_thrusts.copy()
             axial_speed = 12.5
             _, _, up_thrusts, _, _ = env._compute_rotor_wrenches(
                 base_pos,
@@ -319,6 +534,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
                 np.zeros(3, dtype=float),
             )
+            baseline_thrusts = baseline_thrusts.copy()
             wind_w = np.array([1.0, -0.5, 0.0], dtype=float)
             env._mj_model.opt.wind[:] = wind_w
             relative_lateral_velocity = lateral_velocity - wind_w
@@ -359,6 +575,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
                 np.zeros(3, dtype=float),
             )
+            baseline_thrusts = baseline_thrusts.copy()
             _, _, lateral_thrusts, _, _ = env._compute_rotor_wrenches(
                 base_pos,
                 rb,
@@ -386,6 +603,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
                 np.zeros(3, dtype=float),
             )
+            high_thrusts = high_thrusts.copy()
             low_base_pos = np.array([0.0, 0.0, 0.10], dtype=float)
             low_rotor_positions_w, _, low_thrusts, _, _ = env._compute_rotor_wrenches(
                 low_base_pos,
@@ -437,6 +655,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
                 np.zeros(3, dtype=float),
             )
+            high_thrusts = high_thrusts.copy()
             low_rotor_positions_w, _, low_thrusts, _, _ = env._compute_rotor_wrenches(
                 np.array([0.0, 0.0, 0.35], dtype=float),
                 rb,
@@ -450,6 +669,51 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             expected_scales = 1.0 / (1.0 - (env._params.rotor_radius / (4.0 * expected_distances)) ** 2)
             np.testing.assert_allclose(low_thrusts, high_thrusts * expected_scales)
             self.assertTrue(np.all(low_thrusts > high_thrusts))
+        finally:
+            env.close()
+
+    def test_multicopter_ground_effect_raycast_uses_current_pose_without_frequency_cache(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            self._seed_kinematics(env, pos=np.array([0.0, 0.0, 0.30]), linvel=np.zeros(3))
+            env._rotor_angular_velocity[:] = 500.0
+            rb = Rotation.identity()
+            ray_distances = [0.05, 0.20]
+
+            def fake_ray(
+                model: object,
+                data: object,
+                pnt: np.ndarray,
+                vec: np.ndarray,
+                geomgroup: object,
+                flg_static: int,
+                bodyexclude: int,
+                geomid: np.ndarray,
+                cutoff: object,
+            ) -> float:
+                del model, data, pnt, vec, geomgroup, flg_static, bodyexclude, cutoff
+                geomid[0] = 0
+                return ray_distances.pop(0) if ray_distances else 0.20
+
+            with patch("acesim.env.mujoco.mc_env.mujoco.mj_ray", side_effect=fake_ray) as ray:
+                _, _, first_thrusts, _, _ = env._compute_rotor_wrenches(
+                    np.array([0.0, 0.0, 0.30], dtype=float),
+                    rb,
+                    rb.inv(),
+                    np.zeros(3, dtype=float),
+                    np.zeros(3, dtype=float),
+                )
+                first_thrusts = first_thrusts.copy()
+                _, _, second_thrusts, _, _ = env._compute_rotor_wrenches(
+                    np.array([0.0, 0.0, 0.30], dtype=float),
+                    rb,
+                    rb.inv(),
+                    np.zeros(3, dtype=float),
+                    np.zeros(3, dtype=float),
+                )
+
+            self.assertGreaterEqual(ray.call_count, 2)
+            self.assertGreater(float(first_thrusts[0]), float(second_thrusts[0]))
         finally:
             env.close()
 
@@ -467,6 +731,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
                 np.zeros(3, dtype=float),
             )
+            high_thrusts = high_thrusts.copy()
             with patch("acesim.env.mujoco.mc_env.mujoco.mj_ray", return_value=-1.0) as ray:
                 _, _, low_thrusts, _, _ = env._compute_rotor_wrenches(
                     np.array([0.0, 0.0, 0.10], dtype=float),
@@ -495,6 +760,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
                 np.zeros(3, dtype=float),
             )
+            high_thrusts = high_thrusts.copy()
             _, _, low_thrusts, _, _ = env._compute_rotor_wrenches(
                 np.array([0.0, 0.0, 0.0], dtype=float),
                 rb,
@@ -784,6 +1050,31 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             finally:
                 env.close()
 
+    def test_multicopter_downwash_reuses_body_velocity_jacobian_buffers(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="acesim_downwash_jacobian_reuse_") as tmpdir:
+            env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
+            try:
+                body_id = env._downwash_body_ids[0]
+                env._mj_data.xipos[body_id] = np.array([0.0, 0.0, 0.0], dtype=float)
+                rotor_positions_w = np.array([[0.0, 0.0, 0.20]], dtype=float)
+                rotor_thrusts = np.array([3.0], dtype=float)
+
+                with (
+                    patch.object(env, "_estimate_body_projected_area", return_value=0.02),
+                    patch.object(mujoco, "mj_jacBodyCom", wraps=mujoco.mj_jacBodyCom) as velocity,
+                ):
+                    env._compute_downwash_force_for_body(body_id, rotor_positions_w, rotor_thrusts)
+                    first_jacp = velocity.call_args.args[2]
+                    first_jacr = velocity.call_args.args[3]
+                    env._compute_downwash_force_for_body(body_id, rotor_positions_w, rotor_thrusts)
+                    second_jacp = velocity.call_args.args[2]
+                    second_jacr = velocity.call_args.args[3]
+
+                self.assertIs(first_jacp, second_jacp)
+                self.assertIs(first_jacr, second_jacr)
+            finally:
+                env.close()
+
     def test_multicopter_convex_hull_area_handles_large_projected_point_clouds(self) -> None:
         angles = np.linspace(0.0, 2.0 * np.pi, 2048, endpoint=False)
         points = np.column_stack((np.cos(angles), np.sin(angles)))
@@ -965,7 +1256,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             env._rotor_angular_velocity[:] = 0.0
             env._rotor_angular_velocity[0] = 500.0
             tilt = Rotation.from_euler("y", 30.0, degrees=True)
-            env._mj_data.xquat[env._rotor_body_ids[0]] = tilt.as_quat(scalar_first=True)
+            env._mj_data.xmat[env._rotor_body_ids[0]] = tilt.as_matrix().reshape(9)
 
             _, _, rotor_thrusts, rotor_force_w, _ = env._compute_rotor_wrenches(
                 np.array([0.0, 0.0, 1.0], dtype=float),
@@ -979,6 +1270,33 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             np.testing.assert_allclose(rotor_force_w[0], expected_axis_w * rotor_thrusts[0], atol=1e-12)
             self.assertNotAlmostEqual(float(rotor_force_w[0, 0]), 0.0)
             self.assertLess(float(rotor_force_w[0, 2]), float(rotor_thrusts[0]))
+        finally:
+            env.close()
+
+    def test_multicopter_rotor_axis_uses_mujoco_xmat_hot_path(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            self._seed_kinematics(env, pos=np.array([0.0, 0.0, 1.0]), linvel=np.zeros(3))
+            env._rotor_angular_velocity[:] = 500.0
+            tilt = Rotation.from_euler("y", 20.0, degrees=True)
+            env._mj_data.xmat[env._rotor_body_ids[0]] = tilt.as_matrix().reshape(9)
+
+            class _NoFromQuatRotation:
+                @staticmethod
+                def from_quat(*_args: object, **_kwargs: object) -> object:
+                    raise AssertionError("slow path")
+
+            with patch("acesim.env.mujoco.mc_env.Rotation", _NoFromQuatRotation):
+                _, rotor_axes_w, _, _, _ = env._compute_rotor_wrenches(
+                    np.array([0.0, 0.0, 1.0], dtype=float),
+                    Rotation.identity(),
+                    Rotation.identity(),
+                    np.zeros(3, dtype=float),
+                    np.zeros(3, dtype=float),
+                )
+
+            expected_axis_w = tilt.apply(np.array([0.0, 0.0, 1.0], dtype=float))
+            np.testing.assert_allclose(rotor_axes_w[0], expected_axis_w, atol=1e-12)
         finally:
             env.close()
 

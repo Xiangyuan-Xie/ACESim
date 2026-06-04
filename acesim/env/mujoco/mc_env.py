@@ -18,7 +18,6 @@ from acesim.utils.dynamics import (
     LumpedDragParams,
     RotorFlowParams,
     first_order_response_step,
-    idle_visual_speed_target,
 )
 
 
@@ -87,9 +86,27 @@ class MCEnv(PX4MJEnv):
             base = np.array([1.0, -1.0])
             direction = np.tile(base, int(np.ceil(self._rotor_count / base.size)))[: self._rotor_count]
         self._rotor_direction = direction
+        self._rotor_positions_w = np.zeros((self._rotor_count, 3), dtype=float)
+        self._rotor_axes_w = np.zeros((self._rotor_count, 3), dtype=float)
+        self._rotor_thrusts = np.zeros(self._rotor_count, dtype=float)
+        self._rotor_force_w = np.zeros((self._rotor_count, 3), dtype=float)
+        self._rotor_moment_w = np.zeros((self._rotor_count, 3), dtype=float)
+        self._rotor_axis_r_buffer = np.zeros(3, dtype=float)
+        self._v_air_point_w_buffer = np.zeros(3, dtype=float)
+        self._target_visual_speeds = np.zeros(self._rotor_count, dtype=float)
+        self._rotor_spin_axes_local = np.tile(np.array([[0.0, 0.0, 1.0]], dtype=float), (self._rotor_count, 1))
+        self._rotor_mount_quats = np.asarray(
+            [rot.as_quat(scalar_first=True) for rot in self._rotor_mount_rot],
+            dtype=float,
+        )
+        self._rotor_ground_ray_geom_id = np.array([-1], dtype=np.int32)
+        self._rotor_ground_ray_origin = np.zeros(3, dtype=float)
+        self._rotor_ground_ray_direction = np.zeros(3, dtype=float)
         self._downwash_body_ids = self._resolve_downwash_body_ids()
         self._downwash_body_geom_point_offsets = self._build_downwash_body_geom_point_offsets()
         self._downwash_body_projection_hulls = self._build_downwash_body_projection_hulls()
+        self._downwash_jacp = np.zeros((3, self._mj_model.nv), dtype=float)
+        self._downwash_jacr = np.zeros((3, self._mj_model.nv), dtype=float)
 
     def _actuator_channel_count(self) -> int:
         return self._rotor_count
@@ -148,28 +165,31 @@ class MCEnv(PX4MJEnv):
         scale = float(np.clip(scale, params.advance_scale_min, params.advance_scale_max))
 
         if params.ground_effect_enabled:
-            downwash_axis_w = -np.asarray(rotor_axis_w, dtype=float)
-            axis_norm = float(np.linalg.norm(downwash_axis_w))
+            trigger_height = params.ground_effect_height_rotor_diameters * 2.0 * self._params.rotor_radius
+            self._rotor_ground_ray_direction[:] = -rotor_axis_w
+            axis_norm = float(np.linalg.norm(self._rotor_ground_ray_direction))
             ground_distance = -1.0
-            geom_id = np.array([-1], dtype=np.int32)
+            geom_id = -1
+            self._rotor_ground_ray_geom_id[0] = -1
             if axis_norm > 1e-12:
-                downwash_axis_w = downwash_axis_w / axis_norm
+                self._rotor_ground_ray_direction[:] = self._rotor_ground_ray_direction / axis_norm
+                self._rotor_ground_ray_origin[:] = pos_w
                 ground_distance = float(
                     mujoco.mj_ray(
                         self._mj_model,
                         self._mj_data,
-                        np.asarray(pos_w, dtype=float).copy(),
-                        downwash_axis_w.copy(),
+                        self._rotor_ground_ray_origin,
+                        self._rotor_ground_ray_direction,
                         None,
                         1,
                         # Exclude the vehicle tree so only scene surfaces can produce ground effect.
                         self._base_link_id,
-                        geom_id,
+                        self._rotor_ground_ray_geom_id,
                         None,
                     )
                 )
-            trigger_height = params.ground_effect_height_rotor_diameters * 2.0 * self._params.rotor_radius
-            if geom_id[0] >= 0 and 0.0 <= ground_distance < trigger_height:
+                geom_id = int(self._rotor_ground_ray_geom_id[0])
+            if geom_id >= 0 and 0.0 <= ground_distance < trigger_height:
                 max_scale = params.ground_effect_max_scale
                 if ground_distance <= self._params.rotor_radius / 4.0:
                     ground_scale = max_scale
@@ -182,30 +202,40 @@ class MCEnv(PX4MJEnv):
     def _compute_rotor_wrenches(
         self,
         base_pos: np.ndarray,
-        rb: Rotation,
-        rb_inv: Rotation,
+        rb: Rotation | np.ndarray,
+        rb_inv: Rotation | np.ndarray,
         v_com_w: np.ndarray,
         omega_w: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        rotor_positions_w = np.zeros((self._rotor_count, 3))
-        rotor_axes_w = np.zeros((self._rotor_count, 3))
-        rotor_thrusts = np.zeros(self._rotor_count)
-        rotor_force_w = np.zeros((self._rotor_count, 3))
-        rotor_moment_w = np.zeros((self._rotor_count, 3))
+        rotor_positions_w = self._rotor_positions_w
+        rotor_axes_w = self._rotor_axes_w
+        rotor_thrusts = self._rotor_thrusts
+        rotor_force_w = self._rotor_force_w
+        rotor_moment_w = self._rotor_moment_w
+        rotor_positions_w.fill(0.0)
+        rotor_axes_w.fill(0.0)
+        rotor_thrusts.fill(0.0)
+        rotor_force_w.fill(0.0)
+        rotor_moment_w.fill(0.0)
         wind_w = self._get_wind_velocity_w()
+        rb_mat = rb if isinstance(rb, np.ndarray) else rb.as_matrix()
+        rb_inv_mat = rb_inv if isinstance(rb_inv, np.ndarray) else rb_inv.as_matrix()
         for i in range(self._rotor_count):
-            r_off_w = rb.apply(self._rotor_offsets[i])
+            r_off_w = rb_mat @ self._rotor_offsets[i]
             pos_w = base_pos + r_off_w
             rotor_positions_w[i] = pos_w
-            v_point_w = v_com_w + np.cross(omega_w, r_off_w)
-            v_air_point_w = v_point_w - wind_w
-            v_point_r = rb_inv.apply(v_air_point_w)
-            rotor_axis_w = Rotation.from_quat(
-                self._mj_data.xquat[self._rotor_body_ids[i]].copy(), scalar_first=True
-            ).apply(np.array([0.0, 0.0, 1.0], dtype=float))
+            v_air_point_w = self._v_air_point_w_buffer
+            v_air_point_w[0] = v_com_w[0] + omega_w[1] * r_off_w[2] - omega_w[2] * r_off_w[1] - wind_w[0]
+            v_air_point_w[1] = v_com_w[1] + omega_w[2] * r_off_w[0] - omega_w[0] * r_off_w[2] - wind_w[1]
+            v_air_point_w[2] = v_com_w[2] + omega_w[0] * r_off_w[1] - omega_w[1] * r_off_w[0] - wind_w[2]
+            v_point_r = rb_inv_mat @ v_air_point_w
+            rotor_xmat = self._mj_data.xmat[self._rotor_body_ids[i]].reshape(3, 3)
+            rotor_axis_w = rotor_axes_w[i]
+            rotor_axis_w[:] = rotor_xmat[:, 2]
             rotor_axis_w = rotor_axis_w / max(np.linalg.norm(rotor_axis_w), 1e-12)
             rotor_axes_w[i] = rotor_axis_w
-            rotor_axis_r = rb_inv.apply(rotor_axis_w)
+            rotor_axis_r = self._rotor_axis_r_buffer
+            rotor_axis_r[:] = rb_inv_mat @ rotor_axis_w
             rotor_axis_r = rotor_axis_r / max(np.linalg.norm(rotor_axis_r), 1e-12)
             v_axial = float(np.dot(v_point_r, rotor_axis_r))
             v_perp_r = v_point_r - v_axial * rotor_axis_r
@@ -228,8 +258,8 @@ class MCEnv(PX4MJEnv):
             f_drag_r = -self._params.rotor_drag_coeff * omega_abs * v_perp_r
             m_rolling_r = -self._params.rolling_moment_coeff * omega_abs * direction * v_perp_r
 
-            rotor_force_w[i] = rb.apply(rotor_axis_r * thrust + f_drag_r)
-            rotor_moment_w[i] = rb.apply(torque_axis_r + m_rolling_r)
+            rotor_force_w[i] = rb_mat @ (rotor_axis_r * thrust + f_drag_r)
+            rotor_moment_w[i] = rb_mat @ (torque_axis_r + m_rolling_r)
 
         return rotor_positions_w, rotor_axes_w, rotor_thrusts, rotor_force_w, rotor_moment_w
 
@@ -421,9 +451,7 @@ class MCEnv(PX4MJEnv):
             if thrust <= 0.0:
                 continue
             if rotor_axes_w is None:
-                rotor_axis_w = Rotation.from_quat(
-                    self._mj_data.xquat[self._rotor_body_ids[rotor_idx]].copy(), scalar_first=True
-                ).apply(np.array([0.0, 0.0, 1.0], dtype=float))
+                rotor_axis_w = self._mj_data.xmat[self._rotor_body_ids[rotor_idx]].reshape(3, 3)[:, 2].copy()
                 rotor_axis_w = rotor_axis_w / max(np.linalg.norm(rotor_axis_w), 1e-12)
             else:
                 rotor_axis_w = rotor_axes_w[rotor_idx]
@@ -447,8 +475,10 @@ class MCEnv(PX4MJEnv):
 
         if not np.any(aggregate_wake_w):
             return np.zeros(3, dtype=float)
-        jacp = np.zeros((3, self._mj_model.nv), dtype=float)
-        jacr = np.zeros((3, self._mj_model.nv), dtype=float)
+        jacp = self._downwash_jacp
+        jacr = self._downwash_jacr
+        jacp.fill(0.0)
+        jacr.fill(0.0)
         mujoco.mj_jacBodyCom(self._mj_model, self._mj_data, jacp, jacr, body_id)
         v_rel_w = wind_w + aggregate_wake_w - jacp @ self._mj_data.qvel
         v_rel_norm = float(np.linalg.norm(v_rel_w))
@@ -499,41 +529,57 @@ class MCEnv(PX4MJEnv):
     def _apply_vehicle_physics(self) -> None:
         dt_s = self._mj_model.opt.timestep
         self._update_rotor_speed_state(dt_s)
-        base_pos, _, rb, rb_inv, v_com_w, _, omega_w = self._get_base_kinematics()
+        base_pos = self._mj_data.xpos[self._base_link_id].copy()
+        rb_mat = self._mj_data.xmat[self._base_link_id].reshape(3, 3).copy()
+        rb_inv_mat = rb_mat.T
+        v_com_w = self._get_sensor_raw("linvel")
+        omega_r = self._get_sensor_raw("gyro")
+        omega_w = rb_mat @ omega_r
         rotor_positions_w, rotor_axes_w, rotor_thrusts, rotor_force_w, rotor_moment_w = self._compute_rotor_wrenches(
-            base_pos, rb, rb_inv, v_com_w, omega_w
+            base_pos, rb_mat, rb_inv_mat, v_com_w, omega_w
         )
         self._apply_rotor_wrenches(rotor_positions_w, rotor_force_w, rotor_moment_w)
         self._apply_downwash_forces(rotor_positions_w, rotor_thrusts, rotor_axes_w=rotor_axes_w)
-        self._apply_lumped_drag_wrench(base_pos, rb, rb_inv, v_com_w)
-
-    def _compute_visual_rotor_speed(self, rotor_idx: int, armed: bool) -> float:
-        physical_speed = max(0.0, float(self._rotor_angular_velocity[rotor_idx]))
-        actuator_output = float(self._applied_actuator_controls[rotor_idx])
-        return idle_visual_speed_target(
-            physical_speed=physical_speed,
-            actuator_output=actuator_output,
-            armed=armed,
-            idle_speed=self._params.idle_visual_speed,
-            low_speed_blend_end=self._params.low_speed_blend_end,
-        )
+        self._apply_lumped_drag_wrench(base_pos, rb_mat, rb_inv_mat, v_com_w)
 
     def _update_vehicle_visuals(self) -> None:
         armed = self._px4_transport.update_arming_state()
-        target_visual_speeds = np.asarray(
-            [self._compute_visual_rotor_speed(i, armed) for i in range(self._rotor_count)],
-            dtype=float,
-        )
+        if armed:
+            physical_speeds = np.maximum(0.0, self._rotor_angular_velocity)
+            target_visual_speeds = self._target_visual_speeds
+            target_visual_speeds[:] = physical_speeds
+            zero_output = self._applied_actuator_controls <= 0.0
+            target_visual_speeds[zero_output] = np.maximum(
+                target_visual_speeds[zero_output],
+                self._params.idle_visual_speed,
+            )
+            active = ~zero_output
+            if self._params.low_speed_blend_end > 0.0 and np.any(active):
+                blend_weight = np.clip(
+                    1.0 - physical_speeds[active] / self._params.low_speed_blend_end,
+                    0.0,
+                    1.0,
+                )
+                low_speed_target = (
+                    blend_weight * self._params.idle_visual_speed + (1.0 - blend_weight) * physical_speeds[active]
+                )
+                target_visual_speeds[active] = np.maximum(physical_speeds[active], low_speed_target)
+        else:
+            target_visual_speeds = self._target_visual_speeds
+            target_visual_speeds[:] = np.maximum(0.0, self._rotor_angular_velocity)
         self._advance_visual_rotors(
             mocap_ids=self._rotor_mocap_ids,
             offsets_b=self._rotor_visual_offsets,
-            mount_rot=self._rotor_mount_rot,
+            mount_rot=self._rotor_mount_quats,
             rotor_angles=self._rotor_angle,
             visual_speeds=self._visual_rotor_angular_velocity,
             target_speeds=target_visual_speeds,
             spin_directions=self._rotor_direction,
-            spin_axes_local=np.tile(np.array([[0.0, 0.0, 1.0]], dtype=float), (self._rotor_count, 1)),
+            spin_axes_local=self._rotor_spin_axes_local,
             smoothing_tc=self._params.visual_speed_smoothing_tc,
+            base_pos=self._mj_data.xpos[self._base_link_id],
+            base_quat=self._mj_data.xquat[self._base_link_id],
+            rb_mat=self._mj_data.xmat[self._base_link_id].reshape(3, 3),
         )
 
     def _get_visual_rotor_angle(self) -> np.ndarray:

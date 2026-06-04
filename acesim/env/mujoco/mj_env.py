@@ -1,5 +1,8 @@
 """Base MuJoCo environment with merged-scene loading and shared sim clock."""
 
+import json
+import os
+import time
 import xml.etree.ElementTree as ET
 from copy import deepcopy
 from pathlib import Path
@@ -43,6 +46,13 @@ class MJEnv(BaseEnv):
         self._sim_clock = SimulationClock()
         self._clock_publisher = ClockPublisher()
         self._step_count = 0
+        self._gui_profile_enabled = os.environ.get("ACESIM_GUI_PROFILE", "0") == "1"
+        self._gui_profile_skip_s = 15.0
+        self._gui_profile_report_period_s = 5.0
+        self._gui_profile_wall_start_s: float | None = None
+        self._gui_profile_stable_wall_start_s: float | None = None
+        self._gui_profile_stable_sim_start_s: float | None = None
+        self._gui_profile_next_report_s = 0.0
         self._publish_clock()
 
     @property
@@ -75,7 +85,11 @@ class MJEnv(BaseEnv):
     def run(self):
         """Launch MuJoCo's interactive viewer."""
 
-        mujoco.viewer.launch(self._mj_model, self._mj_data)
+        self._before_interactive_viewer()
+        try:
+            mujoco.viewer.launch(self._mj_model, self._mj_data)
+        finally:
+            self._after_interactive_viewer()
 
     def step(self):
         """Advance the MuJoCo simulation by one backend step."""
@@ -144,3 +158,52 @@ class MJEnv(BaseEnv):
 
     def _control(self, model: mujoco.MjModel, data: mujoco.MjData):
         """MuJoCo control callback overridden by subclasses."""
+
+    def _before_interactive_viewer(self) -> None:
+        """Hook for environments that need viewer-specific callback behavior."""
+
+    def _after_interactive_viewer(self) -> None:
+        """Hook for environments that need to restore non-viewer behavior."""
+
+    def _record_interactive_viewer_profile(self, sim_time_s: float) -> None:
+        if not self._gui_profile_enabled:
+            return
+
+        now_s = time.monotonic()
+        if self._gui_profile_wall_start_s is None:
+            self._gui_profile_wall_start_s = now_s
+            self._gui_profile_next_report_s = now_s + self._gui_profile_skip_s + self._gui_profile_report_period_s
+            return
+
+        elapsed_s = now_s - self._gui_profile_wall_start_s
+        if elapsed_s < self._gui_profile_skip_s:
+            return
+
+        if self._gui_profile_stable_wall_start_s is None:
+            self._gui_profile_stable_wall_start_s = now_s
+            self._gui_profile_stable_sim_start_s = sim_time_s
+            return
+
+        if now_s < self._gui_profile_next_report_s:
+            return
+
+        stable_sim_start_s = self._gui_profile_stable_sim_start_s
+        if stable_sim_start_s is None:
+            return
+        stable_wall_s = now_s - self._gui_profile_stable_wall_start_s
+        stable_sim_s = sim_time_s - stable_sim_start_s
+        realtime_factor = stable_sim_s / stable_wall_s if stable_wall_s > 0.0 else 0.0
+        print(
+            "ACESIM_GUI_PROFILE "
+            + json.dumps(
+                {
+                    "elapsed_wall_s": elapsed_s,
+                    "stable_wall_s": stable_wall_s,
+                    "stable_sim_s": stable_sim_s,
+                    "realtime_factor": realtime_factor,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        self._gui_profile_next_report_s = now_s + self._gui_profile_report_period_s
