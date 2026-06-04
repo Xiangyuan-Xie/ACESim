@@ -191,7 +191,19 @@ ACESim 会先读取顶层 `basic` 配置，再加载 `acesim/config/<sim_type>/<
 
 ### ROS 2 / PX4
 
-ROS 2 包位于 `acesim/deploy/aircraft/acesim_ros2`，主要用于完整部署、飞控联调。
+默认完整联调路径仍使用 ROS 2 launch，它会启动 ACESim、PX4、Micro XRCE-DDS Agent 与 ROS 2 bridge：
+
+```bash
+ros2 launch acesim_ros2 linux.launch.py
+```
+
+如果只需要 PX4 + ACESim MAVLink HIL 闭环，也可以使用不依赖 ROS 2 的轻量 core SITL 入口：
+
+```bash
+python -m acesim.sitl --headless --px4-repo acesim/third_party/aircraft/PX4-Autopilot
+```
+
+ROS 2 包位于 `acesim/deploy/aircraft/acesim_ros2`，用于 bridge、`/clock`、ROS 2 offboard、benchmark 和完整联调。
 
 #### Windows + WSL
 

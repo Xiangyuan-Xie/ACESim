@@ -11,8 +11,8 @@ from types import ModuleType
 from unittest.mock import patch
 
 
-def _load_px4_post_start_setup_module() -> ModuleType:
-    module_name = "_test_acesim_ros2_px4_post_start_setup"
+def _load_px4_readiness_module() -> ModuleType:
+    module_name = "_test_acesim_sitl_readiness"
     for name in [
         module_name,
         "pymavlink",
@@ -59,15 +59,7 @@ def _load_px4_post_start_setup_module() -> ModuleType:
     sys.modules["pymavlink"] = pymavlink_module
     sys.modules["pymavlink.mavutil"] = mavutil_module
 
-    module_path = (
-        Path(__file__).resolve().parents[1]
-        / "acesim"
-        / "deploy"
-        / "aircraft"
-        / "acesim_ros2"
-        / "acesim_ros2"
-        / "px4_post_start_setup.py"
-    )
+    module_path = Path(__file__).resolve().parents[1] / "acesim" / "sitl" / "readiness.py"
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to create module spec for {module_path}")
@@ -194,7 +186,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.module = _load_px4_post_start_setup_module()
+        cls.module = _load_px4_readiness_module()
 
     def _ready_estimator(self) -> _EstimatorStatus:
         return _EstimatorStatus(flags=self.module.REQUIRED_ESTIMATOR_FLAGS)
@@ -202,6 +194,29 @@ class PX4PostStartSetupTests(unittest.TestCase):
     def test_post_start_module_does_not_require_ros2_topics(self) -> None:
         self.assertFalse(hasattr(self.module, "rclpy"))
         self.assertFalse(hasattr(self.module, "PX4ReadinessNode"))
+
+    def test_ros2_post_start_setup_is_thin_shim_to_core_readiness(self) -> None:
+        from acesim.sitl import readiness
+
+        module_name = "_test_acesim_ros2_px4_post_start_setup_shim"
+        module_path = (
+            Path(__file__).resolve().parents[1]
+            / "acesim"
+            / "deploy"
+            / "aircraft"
+            / "acesim_ros2"
+            / "acesim_ros2"
+            / "px4_post_start_setup.py"
+        )
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Failed to create module spec for {module_path}")
+        px4_post_start_setup = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = px4_post_start_setup
+        spec.loader.exec_module(px4_post_start_setup)
+
+        self.assertIs(px4_post_start_setup.main, readiness.main)
+        self.assertIs(px4_post_start_setup.run_post_start_setup, readiness.run_post_start_setup)
 
     def test_readiness_succeeds_with_stable_mavlink_samples(self) -> None:
         failures = self.module.readiness_failures(
@@ -489,7 +504,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
 
     def test_mocap_post_start_sends_ekf_origin_then_waits_for_readiness_without_listener_polling(self) -> None:
         calls: list[str] = []
-        mav = object()
+        mav = _FakeMavConnection([])
 
         with patch.object(self.module.mavutil, "mavlink_connection", return_value=mav):
             with patch.object(self.module, "wait_for_mavlink", side_effect=lambda _mav: calls.append("wait_mavlink")):
@@ -521,7 +536,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
 
     def test_mocap_post_start_skips_armability_when_explicitly_disabled(self) -> None:
         calls: list[str] = []
-        mav = object()
+        mav = _FakeMavConnection([])
 
         with patch.object(self.module.mavutil, "mavlink_connection", return_value=mav):
             with patch.object(self.module, "wait_for_mavlink", side_effect=lambda _mav: calls.append("wait_mavlink")):
@@ -552,7 +567,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
 
     def test_mocap_post_start_retries_readiness_when_armability_rejects(self) -> None:
         calls: list[str] = []
-        mav = object()
+        mav = _FakeMavConnection([])
 
         def verify_once_then_succeed(_mav: object) -> None:
             calls.append("verify_armable")
@@ -589,7 +604,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
 
     def test_mocap_post_start_retries_transient_readiness_timeouts(self) -> None:
         calls: list[str] = []
-        mav = object()
+        mav = _FakeMavConnection([])
 
         def readiness_once_then_succeed(_mav: object, _lat: float, _lon: float, **_kwargs: object) -> None:
             calls.append("wait_ready")
@@ -636,7 +651,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
         )
 
     def test_mocap_post_start_prints_custom_ready_message_after_armability_verification(self) -> None:
-        mav = object()
+        mav = _FakeMavConnection([])
 
         with patch.object(self.module.mavutil, "mavlink_connection", return_value=mav):
             with patch.object(self.module, "wait_for_mavlink"):
@@ -677,7 +692,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
             self.module.verify_armable(mav, arm_timeout_sec=1.0, disarm_timeout_sec=1.0)
 
     def test_mocap_post_start_logs_ekf_origin_setup(self) -> None:
-        mav = object()
+        mav = _FakeMavConnection([])
 
         with patch.object(self.module.mavutil, "mavlink_connection", return_value=mav):
             with patch.object(self.module, "wait_for_mavlink"):

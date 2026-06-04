@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import importlib.util
 import os
 import re
-import shlex
 import sys
 import tempfile
 from pathlib import Path
@@ -23,245 +21,38 @@ from launch.events import Shutdown
 from launch_ros.actions import Node
 
 from acesim.config.config_loader import ConfigLoader
+from acesim.sitl.process import build_graceful_shutdown_command
+from acesim.sitl.process import build_python_module_run_command as core_build_python_module_run_command
+from acesim.sitl.px4_bootstrap import build_px4_env as core_build_px4_env
+from acesim.sitl.px4_bootstrap import (
+    build_px4_make_command,
+)
+from acesim.sitl.px4_bootstrap import load_px4_repo_path as core_load_px4_repo_path
+from acesim.sitl.px4_bootstrap import resolve_px4_startup_env as core_resolve_px4_startup_env
 from acesim.utils.px4_transport import PX4SensorParams
 
-PX4_STARTUP_ENV_BY_ASSET: dict[str, dict[str, str]] = {
-    "iris": {
-        "PX4_SYS_AUTOSTART": "10016",
-        "PX4_SIM_MODEL": "none",
-    },
-    "x500": {
-        "PX4_SYS_AUTOSTART": "10016",
-        "PX4_SIM_MODEL": "none",
-    },
-    "x500_arm2x": {
-        "PX4_SYS_AUTOSTART": "10016",
-        "PX4_SIM_MODEL": "none",
-    },
-    "typhoon_h480": {
-        "PX4_SYS_AUTOSTART": "6011",
-        "PX4_SIM_MODEL": "none",
-    },
-    # These assets reuse PX4's gz_* airframe parameter sets, but ACESim still
-    # runs them through `make px4_sitl none` with HIL sensors/actuators. Force
-    # Gazebo back off so PX4 stays on the simulator_mavlink path. Overriding
-    # only SIM_GZ_EN is not enough because the gz_* airframe scripts also set
-    # PX4_SIMULATOR=gz, and px4-rc.simulator enters gz whenever either signal
-    # is present.
-    "advanced_plane": {
-        "PX4_SYS_AUTOSTART": "1039",
-        "PX4_SIM_MODEL": "none",
-        "PX4_SIMULATOR": "none",
-        "PX4_PARAM_SIM_GZ_EN": "0",
-    },
-    "standard_vtol": {
-        "PX4_SYS_AUTOSTART": "1040",
-        "PX4_SIM_MODEL": "none",
-        "PX4_SIMULATOR": "none",
-        "PX4_PARAM_SIM_GZ_EN": "0",
-    },
-    "uuv_bluerov2_heavy": {
-        "PX4_SYS_AUTOSTART": "60002",
-        "PX4_SIM_MODEL": "none",
-        "PX4_SIMULATOR": "none",
-        "PX4_PARAM_SIM_GZ_EN": "0",
-    },
-}
 _TCP_ENDPOINT_PATTERN = re.compile(r"^tcp://(?P<host>[^:/]+):(?P<port>\d+)$")
 
 
 def detect_acesim_root() -> Path:
-    spec = importlib.util.find_spec("acesim")
-    if spec is not None:
-        locations = spec.submodule_search_locations
-        if locations:
-            return Path(next(iter(locations))).resolve()
-        origin = spec.origin
-        if origin:
-            return Path(origin).resolve().parent
-    env = os.environ.get("ACESIM_ROOT")
-    if env:
-        return Path(env).resolve()
-    raise RuntimeError("Failed to locate ACESim repository; set ACESIM_ROOT or pass px4_repo")
+    return Path(__file__).resolve().parents[4]
 
 
 def load_px4_repo_path(override: Optional[str]) -> str:
-    if isinstance(override, str) and override.strip():
-        value = Path(override.strip())
-        if not value.is_absolute():
-            value = (detect_acesim_root() / value).resolve()
-        return str(value)
-    return str((detect_acesim_root() / "third_party" / "aircraft" / "PX4-Autopilot").resolve())
+    return str(core_load_px4_repo_path(override))
 
 
 def resolve_px4_startup_env(config_loader: ConfigLoader | None = None) -> dict[str, str]:
     """Map the configured ACESim asset onto the PX4 airframe startup environment."""
     if config_loader is None:
         config_loader = ConfigLoader()
-    asset_name = config_loader.get_asset_name()
-    startup_env = PX4_STARTUP_ENV_BY_ASSET.get(asset_name)
-    if startup_env is not None:
-        return dict(startup_env)
-    supported_assets = ", ".join(sorted(PX4_STARTUP_ENV_BY_ASSET))
-    raise ValueError(f"Unsupported PX4 startup asset: {asset_name}. Supported assets: {supported_assets}")
+    return core_resolve_px4_startup_env(config_loader)
 
 
 def build_px4_additional_env(config_loader: ConfigLoader | None = None) -> dict[str, str]:
     if config_loader is None:
         config_loader = ConfigLoader()
-    sensor_params = PX4SensorParams.from_asset_params(
-        config_loader.get_asset_params(),
-        dynamic_hil_sensor_fields=False,
-    )
-    additional_env = resolve_px4_startup_env(config_loader)
-
-    additional_env.update(
-        {
-            # Keep external modes registered and checked while armed so the
-            # internally hosted RL mode remains selectable after takeoff.
-            "PX4_PARAM_COM_MODE_ARM_CHK": "1",
-            # ACESim SITL has no real power module. PX4's HIL/SIH airframes use
-            # this same circuit breaker, and keeping the battery simulator on
-            # prevents QGC from seeing a missing/invalid battery source during
-            # UE startup.
-            "PX4_PARAM_CBRK_SUPPLY_CHK": "894281",
-            "PX4_PARAM_SIM_BAT_ENABLE": "1",
-        }
-    )
-    if sensor_params.fusion_mode == "hil":
-        additional_env.update(
-            {
-                "PX4_PARAM_EKF2_EV_CTRL": "0",
-                "PX4_PARAM_EKF2_GPS_CTRL": "7",
-                "PX4_PARAM_EKF2_HGT_REF": "1",
-                "PX4_PARAM_EKF2_MAG_TYPE": "0",
-                "PX4_PARAM_SYS_HAS_GPS": "1",
-                "PX4_PARAM_SYS_HAS_MAG": "1",
-                "PX4_PARAM_SYS_HAS_BARO": "1",
-            }
-        )
-        return additional_env
-
-    hgt_ref_by_name = {
-        "Baro": "0",
-        "GPS": "1",
-        "Range sensor": "2",
-        "Vision": "3",
-    }
-    if sensor_params.ekf2_hgt_ref not in hgt_ref_by_name:
-        raise ValueError(f"Unsupported EKF2_HGT_REF value: {sensor_params.ekf2_hgt_ref}")
-
-    additional_env.update(
-        {
-            "PX4_PARAM_EKF2_EV_CTRL": str(sensor_params.ekf2_ev_ctrl),
-            "PX4_PARAM_EKF2_HGT_REF": hgt_ref_by_name[sensor_params.ekf2_hgt_ref],
-            "PX4_PARAM_EKF2_EV_DELAY": str(sensor_params.ekf2_ev_delay_ms),
-            "PX4_PARAM_EKF2_EV_POS_X": str(sensor_params.ekf2_ev_pos_body_m[0]),
-            "PX4_PARAM_EKF2_EV_POS_Y": str(sensor_params.ekf2_ev_pos_body_m[1]),
-            "PX4_PARAM_EKF2_EV_POS_Z": str(sensor_params.ekf2_ev_pos_body_m[2]),
-            "PX4_PARAM_EKF2_EV_NOISE_MD": str(sensor_params.ekf2_ev_noise_md),
-            "PX4_PARAM_EKF2_EVP_NOISE": str(sensor_params.ekf2_evp_noise),
-            "PX4_PARAM_EKF2_EVV_NOISE": str(sensor_params.ekf2_evv_noise),
-            "PX4_PARAM_EKF2_EVA_NOISE": str(sensor_params.ekf2_eva_noise),
-            "PX4_PARAM_EKF2_GPS_CTRL": str(sensor_params.ekf2_gps_ctrl),
-            "PX4_PARAM_EKF2_MAG_TYPE": str(sensor_params.ekf2_mag_type),
-            "PX4_PARAM_SYS_HAS_GPS": "0",
-            "PX4_PARAM_SYS_HAS_MAG": "0",
-            "PX4_PARAM_SYS_HAS_BARO": "0",
-        }
-    )
-    return additional_env
-
-
-def build_px4_make_command(additional_env: dict[str, str]) -> str:
-    """Launch PX4 with explicit exported overrides so gz airframes stay on mavlinksim."""
-
-    exports = " ".join(f"{name}={shlex.quote(value)}" for name, value in sorted(additional_env.items()))
-    return f"env {exports} make px4_sitl none"
-
-
-def build_graceful_shutdown_command(command: str, *, filter_px4_prompt: bool = False) -> list[str]:
-    output_filter_setup = ""
-    child_output_redirect = ""
-    output_filter_cleanup = ""
-    if filter_px4_prompt:
-        filter_script = (
-            "import os, re, signal\n"
-            "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
-            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-            "ansi_pattern = re.compile(rb'\\x1b\\[[0-9;?]*[ -/]*[@-~]')\n"
-            "prompt_pattern = re.compile(rb'pxh>\\s?')\n"
-            "buffer = b''\n"
-            "def clean(chunk):\n"
-            "    chunk = ansi_pattern.sub(b'', chunk)\n"
-            "    chunk = chunk.replace(b'\\r', b'')\n"
-            "    return prompt_pattern.sub(b'', chunk)\n"
-            "while True:\n"
-            "    data = os.read(0, 4096)\n"
-            "    if not data:\n"
-            "        break\n"
-            "    buffer += data\n"
-            "    lines = buffer.split(b'\\n')\n"
-            "    for line in lines[:-1]:\n"
-            "        line = clean(line + b'\\n')\n"
-            "        if line.strip():\n"
-            "            os.write(1, line)\n"
-            "    buffer = lines[-1]\n"
-            "    if len(buffer) > 65536:\n"
-            "        buffer = clean(buffer)\n"
-            "        if buffer.strip():\n"
-            "            os.write(1, buffer)\n"
-            "        buffer = b''\n"
-            "buffer = clean(buffer)\n"
-            "if buffer.strip():\n"
-            "    os.write(1, buffer)\n"
-        )
-        output_filter_setup = (
-            "_filter_dir=$(mktemp -d)\n"
-            '_filter_pipe="$_filter_dir/px4-output"\n'
-            'mkfifo "$_filter_pipe"\n'
-            f'python3 -c {shlex.quote(filter_script)} < "$_filter_pipe" &\n'
-            "_filter_pid=$!\n"
-        )
-        child_output_redirect = ' > "$_filter_pipe" 2>&1'
-        output_filter_cleanup = (
-            'wait "$_filter_pid" 2>/dev/null || true\n' 'rm -rf "$_filter_dir" 2>/dev/null || true\n'
-        )
-    script = (
-        "_signal_received=0\n"
-        f"{output_filter_setup}"
-        "_cleanup_after_signal() {\n"
-        "  _signal_received=1\n"
-        "  _sig=$1\n"
-        '  if [ "$_sig" = INT ]; then\n'
-        '    kill -INT -- "-$_child_pid" 2>/dev/null || true\n'
-        "  else\n"
-        '    kill -TERM -- "-$_child_pid" 2>/dev/null || true\n'
-        "  fi\n"
-        "  for _ in 1 2 3 4 5; do\n"
-        '    kill -0 -- "-$_child_pid" 2>/dev/null || return 0\n'
-        "    sleep 0.2\n"
-        "  done\n"
-        '  kill -TERM -- "-$_child_pid" 2>/dev/null || true\n'
-        "  for _ in 1 2 3 4 5; do\n"
-        '    kill -0 -- "-$_child_pid" 2>/dev/null || return 0\n'
-        "    sleep 0.2\n"
-        "  done\n"
-        '  kill -KILL -- "-$_child_pid" 2>/dev/null || true\n'
-        "}\n"
-        "_forward_sigint() { _cleanup_after_signal INT; }\n"
-        "_forward_sigterm() { _cleanup_after_signal TERM; }\n"
-        "trap _forward_sigint INT\n"
-        "trap _forward_sigterm TERM\n"
-        f'setsid bash -lc "$1"{child_output_redirect} &\n'
-        "_child_pid=$!\n"
-        'wait "$_child_pid"\n'
-        "_status=$?\n"
-        f"{output_filter_cleanup}"
-        'if [ "$_signal_received" -eq 1 ]; then wait "$_child_pid" 2>/dev/null || true; exit 0; fi\n'
-        'exit "$_status"'
-    )
-    return ["bash", "-lc", script, "_", command]
+    return core_build_px4_env(config_loader, sensor_params_cls=PX4SensorParams)
 
 
 def package_share_dir() -> Path | None:
@@ -383,13 +174,7 @@ def build_python_module_run_command(
     additional_env: Optional[dict[str, str]] = None,
     extra_args: Optional[list[str]] = None,
 ) -> str:
-    env = {"PYTHONUNBUFFERED": "1"}
-    if additional_env:
-        env.update(additional_env)
-    exports = " ".join(f"{name}={shlex.quote(value)}" for name, value in sorted(env.items()))
-    args = " ".join(shlex.quote(arg) for arg in (extra_args or []))
-    suffix = f" {args}" if args else ""
-    return f"env {exports} ros2 run {shlex.quote(package)} {shlex.quote(executable)}{suffix}"
+    return core_build_python_module_run_command(package, executable, additional_env, extra_args)
 
 
 def build_px4_post_start_setup_process(additional_env: Optional[dict[str, str]] = None) -> ExecuteProcess:

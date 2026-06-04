@@ -823,6 +823,14 @@ bridges:
         self.assertIn("PX4_PARAM_SIM_GZ_EN=0", command_text)
         self.assertIn("make px4_sitl none", command_text)
 
+    def test_detect_acesim_root_preserves_ros2_package_root_contract(self) -> None:
+        root = self.launch_common.detect_acesim_root()
+
+        self.assertEqual(root.name, "acesim")
+        self.assertTrue((root / "config").is_dir())
+        self.assertTrue((root / "deploy" / "aircraft" / "acesim_ros2").is_dir())
+        self.assertFalse(hasattr(self.launch_common, "build_core_sitl_action"))
+
 
 if __name__ == "__main__":
     unittest.main()

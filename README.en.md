@@ -219,7 +219,19 @@ ACESim first reads the top-level `basic` configuration, then loads asset paramet
 
 ### ROS 2 / PX4
 
-The ROS 2 package lives in `acesim/deploy/aircraft/acesim_ros2`. Use it for full deployment, bridge, clock-sync, and integration workflows:
+The default full-integration path remains the ROS 2 launch flow. It starts ACESim, PX4, Micro XRCE-DDS Agent, and the ROS 2 bridge:
+
+```bash
+ros2 launch acesim_ros2 linux.launch.py
+```
+
+For a lightweight PX4 + ACESim MAVLink HIL loop without ROS 2, use the optional core SITL entrypoint:
+
+```bash
+python -m acesim.sitl --headless --px4-repo acesim/third_party/aircraft/PX4-Autopilot
+```
+
+The ROS 2 package lives in `acesim/deploy/aircraft/acesim_ros2`. Use it for bridge, `/clock`, ROS 2 offboard, benchmark, and full integration workflows:
 
 ```bash
 ros2 launch acesim_ros2 linux.launch.py
