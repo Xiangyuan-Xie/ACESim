@@ -28,13 +28,13 @@ ground_effect_height_rotor_diameters = 1.0
 mode = "mocap"
 
 [params.px4_fusion.hil]
-hil_sensor_rate_hz = 250.0
+hil_sensor_rate_hz = 200.0
 mag_rate_hz = 84.0
 baro_rate_hz = 42.0
 gps_rate_hz = 5.0
 
 [params.px4_fusion.mocap]
-hil_sensor_rate_hz = 250.0
+hil_sensor_rate_hz = 200.0
 vision_rate_hz = 100.0
 ekf2_ev_ctrl = 11
 ekf2_hgt_ref = "Vision"

@@ -14,9 +14,6 @@ from typing import Any, Mapping, Sequence, TypeAlias
 import numpy as np
 from numpy.typing import NDArray
 from pymavlink import mavutil
-from scipy.spatial.transform import Rotation
-
-from acesim.utils.frame import rotation_world_nwu_body_flu_to_ned_frd, world_nwu_to_ned
 
 FloatArray: TypeAlias = NDArray[np.float64]
 
@@ -248,7 +245,7 @@ class PX4Transport:
                 latest_controls = msg.controls
         return latest_controls
 
-    def update_actuator_commands(self, sim_time_us: int, channel_count: int) -> None:
+    def update_actuator_commands(self, sim_time_us: int, channel_count: int) -> bool:
         """Drain the latest actuator frame and expose it immediately."""
 
         del sim_time_us
@@ -268,6 +265,8 @@ class PX4Transport:
             applied = np.zeros(channel_count, dtype=float)
             applied[:channel_count] = normalized[:channel_count]
             self._applied_actuator_controls = applied
+            return True
+        return False
 
     def read_applied_actuator_controls(self, channel_count: int) -> FloatArray | None:
         """Return the latest normalized actuator controls seen so far."""
@@ -378,13 +377,18 @@ class PX4Transport:
         if not self._is_connected:
             raise RuntimeError("send_vision_position_estimate called before HEARTBEAT connection")
 
-        position_ned = world_nwu_to_ned(np.asarray(position_world_m, dtype=float))
+        position_world_m = np.asarray(position_world_m, dtype=float)
+        position_ned = np.array([position_world_m[0], -position_world_m[1], -position_world_m[2]], dtype=float)
         attitude_quat = np.asarray(attitude_world_quat, dtype=float)
         if attitude_quat.shape != (4,):
             raise ValueError("attitude_world_quat must be a flat scalar-first quaternion")
-        rotation_world_body = Rotation.from_quat(attitude_quat, scalar_first=True)
-        rotation_ned_frd = rotation_world_nwu_body_flu_to_ned_frd(rotation_world_body)
-        roll, pitch, yaw = rotation_ned_frd.as_euler("xyz", degrees=False)
+        w = float(attitude_quat[0])
+        x = float(attitude_quat[1])
+        y = -float(attitude_quat[2])
+        z = -float(attitude_quat[3])
+        roll = np.arctan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+        pitch = np.arcsin(np.clip(2.0 * (w * y - z * x), -1.0, 1.0))
+        yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
         with self._hil_io_lock:
             self._hil_mavlink_connection.mav.vision_position_estimate_send(

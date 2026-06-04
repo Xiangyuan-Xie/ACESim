@@ -6,13 +6,22 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, TypedDict
 
 import numpy as np
 from pyulog import ULog
 
 DEFAULT_LOG_GLOB = "acesim/third_party/aircraft/PX4-Autopilot/" "build/px4_sitl_default/rootfs/log/**/*.ulg"
 DEFAULT_OUTPUT_DIR = "analysis_outputs"
+
+
+class PX4TimingEvidenceTopic(TypedDict):
+    topic: str
+    source: str
+    recommended: float | None
+    confidence: str
+    note: str
+
 
 NAV_STATE_NAMES = {
     0: "MANUAL",
@@ -35,6 +44,63 @@ NAV_STATE_NAMES = {
     29: "EXTERNAL7",
     30: "EXTERNAL8",
 }
+
+PX4_TIMING_EVIDENCE_TOPICS: tuple[PX4TimingEvidenceTopic, ...] = (
+    {
+        "topic": "sensor_combined",
+        "source": "src/modules/mavlink/mavlink_receiver.cpp::handle_message_hil_sensor; "
+        "src/modules/sensors/vehicle_imu/VehicleIMU.cpp; "
+        "src/modules/sensors/voted_sensors_update.cpp",
+        "recommended": 200.0,
+        "confidence": "high",
+        "note": "PX4 HIL_SENSOR updates simulated gyro/accel; VehicleIMU integrates at IMU_INTEG_RATE.",
+    },
+    {
+        "topic": "vehicle_visual_odometry",
+        "source": "src/modules/mavlink/mavlink_receiver.cpp::handle_message_vision_position_estimate",
+        "recommended": 100.0,
+        "confidence": "medium",
+        "note": (
+            "ACESim mocap mode sends VISION_POSITION_ESTIMATE; missing ULog topic means input rate is " "not validated."
+        ),
+    },
+    {
+        "topic": "vehicle_mocap_odometry",
+        "source": "src/modules/mavlink/mavlink_receiver.cpp::handle_message_vision_position_estimate",
+        "recommended": 100.0,
+        "confidence": "medium",
+        "note": "Alternate external-vision/mocap topic name; missing topic is insufficient evidence.",
+    },
+    {
+        "topic": "sensor_gyro",
+        "source": "src/modules/mavlink/mavlink_receiver.cpp::handle_message_hil_sensor; PX4Gyroscope::update",
+        "recommended": None,
+        "confidence": "logger-only",
+        "note": "Raw sensor_gyro is often ULog-downsampled and should not be used directly as the IMU sim rate.",
+    },
+    {
+        "topic": "vehicle_angular_velocity",
+        "source": "src/modules/sensors/vehicle_angular_velocity/VehicleAngularVelocity.cpp; "
+        "src/modules/mc_rate_control/MulticopterRateControl.cpp",
+        "recommended": None,
+        "confidence": "logger-only",
+        "note": "This topic triggers rate control in PX4, but ULog recorded rate may be logger-limited.",
+    },
+    {
+        "topic": "am_policy_observation",
+        "source": "src/modules/am_pos_control/am_pos_control.cpp",
+        "recommended": None,
+        "confidence": "medium",
+        "note": "Useful evidence for AM policy observation/action cadence when the topic is logged.",
+    },
+    {
+        "topic": "actuator_outputs",
+        "source": "src/modules/mavlink/streams/HIL_ACTUATOR_CONTROLS.hpp",
+        "recommended": None,
+        "confidence": "rate-only",
+        "note": "actuator_outputs has no timestamp_sample, so actuator latency is not estimable from this topic.",
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -133,6 +199,62 @@ def _safe_output_stem(log_path: Path) -> str:
     return f"{date_part}_{log_path.stem}".replace(os.sep, "_")
 
 
+def _recorded_rate_hz(topic_data: dict[str, np.ndarray]) -> float | None:
+    timestamps = np.asarray(topic_data.get("timestamp", []), dtype=np.float64)
+    if timestamps.size < 2:
+        return None
+    dt_s = np.diff(timestamps) * 1e-6
+    dt_s = dt_s[np.isfinite(dt_s) & (dt_s > 0.0)]
+    if dt_s.size == 0:
+        return None
+    return float(1.0 / np.median(dt_s))
+
+
+def _sample_delay_ms(topic_data: dict[str, np.ndarray]) -> float | None:
+    if "timestamp" not in topic_data or "timestamp_sample" not in topic_data:
+        return None
+    timestamps = np.asarray(topic_data["timestamp"], dtype=np.float64)
+    samples = np.asarray(topic_data["timestamp_sample"], dtype=np.float64)
+    count = min(timestamps.size, samples.size)
+    if count == 0:
+        return None
+    delays_ms = (timestamps[:count] - samples[:count]) * 1e-3
+    delays_ms = delays_ms[np.isfinite(delays_ms)]
+    if delays_ms.size == 0:
+        return None
+    return float(np.median(delays_ms))
+
+
+def summarize_px4_timing_evidence(topics: dict[str, dict[str, np.ndarray]]) -> list[str]:
+    """Summarize PX4 source-backed timing evidence from extracted ULog topic arrays."""
+
+    lines = ["PX4 source-backed timing evidence:"]
+    for item in PX4_TIMING_EVIDENCE_TOPICS:
+        topic = item["topic"]
+        topic_data = topics.get(topic)
+        if topic_data is None:
+            recorded_rate = "insufficient evidence"
+            sample_delay = "insufficient evidence"
+            confidence = "insufficient"
+        else:
+            rate_hz = _recorded_rate_hz(topic_data)
+            recorded_rate = f"{rate_hz:.3f} Hz" if rate_hz is not None else "insufficient evidence"
+            delay_ms = _sample_delay_ms(topic_data)
+            sample_delay = f"{delay_ms:.3f} ms" if delay_ms is not None else "not estimable"
+            confidence = str(item["confidence"])
+
+        recommended = item["recommended"]
+        recommended_text = f"{float(recommended):.3f} Hz" if recommended is not None else "no direct config change"
+        lines.append(
+            f"  topic={topic}: ulog_recorded_rate={recorded_rate}; "
+            f"timestamp_sample_delay={sample_delay}; "
+            f"px4_source_path={item['source']}; "
+            f"recommended_sim_rate={recommended_text}; "
+            f"confidence={confidence}; note={item['note']}"
+        )
+    return lines
+
+
 def analyze_log(log_path: Path, output_dir: Path) -> AnalysisResult:
     import matplotlib
 
@@ -157,6 +279,7 @@ def analyze_log(log_path: Path, output_dir: Path) -> AnalysisResult:
         for message in ulog.logged_messages
         if "AM Position Offboard requires fresh supported offboard_control_mode" in message.message
     ]
+    timing_topics = {dataset.name: dataset.data for dataset in ulog.data_list}
 
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = _safe_output_stem(log_path)
@@ -181,6 +304,7 @@ def analyze_log(log_path: Path, output_dir: Path) -> AnalysisResult:
                 am_warning_count=len(am_warning_times),
                 times_s=times_s,
                 controls=controls,
+                px4_timing_evidence=summarize_px4_timing_evidence(timing_topics),
             )
         )
         + "\n",
@@ -259,6 +383,7 @@ def _summary_lines(
     am_warning_count: int,
     times_s: np.ndarray,
     controls: np.ndarray,
+    px4_timing_evidence: Sequence[str] | None = None,
 ) -> list[str]:
     lines = [
         f"ULog: {log_path}",
@@ -301,6 +426,8 @@ def _summary_lines(
         )
     )
     lines.extend(summarize_motor_window("POSCTL after 29.192 s window", times_s, controls, times_s >= 29.192))
+    if px4_timing_evidence is not None:
+        lines.extend(["", *px4_timing_evidence])
     return lines
 
 

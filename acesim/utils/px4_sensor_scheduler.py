@@ -191,6 +191,43 @@ class PX4SensorScheduler:
         dt_s = max(0.0, (current_time_us - self._last_update_time_us) * 1e-6)
         self._last_update_time_us = current_time_us
 
+        mag_due = False
+        if self._params.send_mag:
+            self._mag_elapsed_s += dt_s
+            while self._mag_elapsed_s + 1e-12 >= self._mag_period_s:
+                self._mag_elapsed_s -= self._mag_period_s
+                mag_due = True
+
+        baro_due = False
+        if self._params.send_baro:
+            self._baro_elapsed_s += dt_s
+            while self._baro_elapsed_s + 1e-12 >= self._baro_period_s:
+                self._baro_elapsed_s -= self._baro_period_s
+                baro_due = True
+
+        self._hil_sensor_elapsed_s += dt_s
+        hil_due = False
+        while self._hil_sensor_elapsed_s + 1e-12 >= self._hil_sensor_period_s:
+            self._hil_sensor_elapsed_s -= self._hil_sensor_period_s
+            hil_due = True
+
+        gps_due = False
+        if self._params.send_gps:
+            self._gps_elapsed_s += dt_s
+            while self._gps_elapsed_s + 1e-12 >= self._gps_period_s:
+                self._gps_elapsed_s -= self._gps_period_s
+                gps_due = True
+
+        vision_due = False
+        if self._params.send_vision:
+            self._vision_elapsed_s += dt_s
+            while self._vision_elapsed_s + 1e-12 >= self._vision_period_s:
+                self._vision_elapsed_s -= self._vision_period_s
+                vision_due = True
+
+        if not (mag_due or baro_due or hil_due or gps_due or vision_due):
+            return False
+
         sample = self._read_sensor_sample()
         accel_frd = np.asarray(sample.accel_frd, dtype=float)
         gyro_frd = np.asarray(sample.gyro_frd, dtype=float)
@@ -214,21 +251,11 @@ class PX4SensorScheduler:
             raise ValueError("attitude_world_quat must be a flat 4D array")
 
         if self._params.send_mag:
-            self._mag_elapsed_s += dt_s
-            mag_due = False
-            while self._mag_elapsed_s + 1e-12 >= self._mag_period_s:
-                self._mag_elapsed_s -= self._mag_period_s
-                mag_due = True
             if mag_due:
                 self._last_mag_frd = mag_frd + np.random.normal(0.0, self._params.mag_noise_std_gauss, size=3)
                 self._mag_pending = True
 
         if self._params.send_baro:
-            self._baro_elapsed_s += dt_s
-            baro_due = False
-            while self._baro_elapsed_s + 1e-12 >= self._baro_period_s:
-                self._baro_elapsed_s -= self._baro_period_s
-                baro_due = True
             if baro_due:
                 self._last_baro_altitude_m = float(
                     self._params.gps_alt_start
@@ -238,11 +265,6 @@ class PX4SensorScheduler:
                 self._baro_pending = True
 
         sensor_sent = False
-        self._hil_sensor_elapsed_s += dt_s
-        hil_due = False
-        while self._hil_sensor_elapsed_s + 1e-12 >= self._hil_sensor_period_s:
-            self._hil_sensor_elapsed_s -= self._hil_sensor_period_s
-            hil_due = True
         if hil_due:
             self._last_accel_frd = accel_frd + np.random.normal(0.0, self._params.accel_noise_std_mps2)
             self._last_gyro_frd = gyro_frd + np.random.normal(0.0, self._params.gyro_noise_std_radps, size=3)
@@ -270,11 +292,6 @@ class PX4SensorScheduler:
             sensor_sent = True
 
         if self._params.send_gps:
-            self._gps_elapsed_s += dt_s
-            gps_due = False
-            while self._gps_elapsed_s + 1e-12 >= self._gps_period_s:
-                self._gps_elapsed_s -= self._gps_period_s
-                gps_due = True
             if gps_due:
                 noisy_position_world_m = position_world_m + np.random.normal(
                     0.0, self._params.gps_pos_noise_std_m, size=3
@@ -311,11 +328,6 @@ class PX4SensorScheduler:
                 )
 
         if self._params.send_vision:
-            self._vision_elapsed_s += dt_s
-            vision_due = False
-            while self._vision_elapsed_s + 1e-12 >= self._vision_period_s:
-                self._vision_elapsed_s -= self._vision_period_s
-                vision_due = True
             if vision_due:
                 if self._vision_attitude_is_plausible(attitude_world_quat):
                     self._px4_transport.send_vision_position_estimate(

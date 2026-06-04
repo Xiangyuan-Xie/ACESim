@@ -178,6 +178,40 @@ class PX4TransportSchedulerTests(unittest.TestCase):
                 self.assertEqual(float(mocap_config["ekf2_eva_noise"]), 0.01)
                 self.assertEqual(int(mocap_config["ekf2_mag_type"]), 0)
 
+    def test_x500_mujoco_configs_align_hil_imu_stream_to_px4_imu_integration_rate(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        for asset_name in ("x500", "x500_arm2x"):
+            config_path = repo_root / "acesim" / "config" / "mujoco" / f"{asset_name}.toml"
+            config = tomli.loads(config_path.read_text(encoding="utf-8"))
+            px4_fusion = config["params"]["px4_fusion"]
+
+            with self.subTest(asset=asset_name):
+                self.assertEqual(float(px4_fusion["hil"]["hil_sensor_rate_hz"]), 200.0)
+                self.assertEqual(float(px4_fusion["mocap"]["hil_sensor_rate_hz"]), 200.0)
+                self.assertEqual(float(px4_fusion["mocap"]["vision_rate_hz"]), 100.0)
+                self.assertEqual(float(px4_fusion["hil"]["mag_rate_hz"]), 84.0)
+                self.assertEqual(float(px4_fusion["hil"]["baro_rate_hz"]), 42.0)
+                self.assertEqual(float(px4_fusion["hil"]["gps_rate_hz"]), 5.0)
+
+    def test_non_x500_mujoco_configs_keep_declared_hil_sensor_rates(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        expected_rates = {
+            "standard_vtol": 250.0,
+            "advanced_plane": 250.0,
+            "uuv_bluerov2_heavy": 250.0,
+        }
+
+        for asset_name, expected_rate in expected_rates.items():
+            config_path = repo_root / "acesim" / "config" / "mujoco" / f"{asset_name}.toml"
+            config = tomli.loads(config_path.read_text(encoding="utf-8"))
+
+            with self.subTest(asset=asset_name):
+                self.assertEqual(
+                    float(config["params"]["px4_fusion"]["hil"]["hil_sensor_rate_hz"]),
+                    expected_rate,
+                )
+
     def _make_scheduler(
         self,
         *,
@@ -208,6 +242,114 @@ class PX4TransportSchedulerTests(unittest.TestCase):
 
         return clock, transport, PX4SensorScheduler(transport, clock, params, read_sample)
 
+    def test_scheduler_uses_200hz_hil_sensor_boundary_without_early_publish(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=200.0,
+            vision_rate_hz=100.0,
+            accel_noise_std_mps2=(0.0, 0.0, 0.0),
+            gyro_noise_std_radps=0.0,
+        )
+
+        def read_sample() -> PX4SensorSample:
+            return PX4SensorSample(
+                accel_frd=np.array([1.0, 2.0, 3.0], dtype=float),
+                gyro_frd=np.array([0.1, 0.2, 0.3], dtype=float),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=np.zeros(3, dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+
+        clock.advance_us(4_999)
+        self.assertFalse(scheduler.update())
+        self.assertEqual(len(transport.hil_sensor_calls), 0)
+
+        clock.advance_us(1)
+        self.assertTrue(scheduler.update())
+        self.assertEqual(transport.hil_sensor_calls[0]["timestamp_us"], 5_000)
+        fields = transport.hil_sensor_calls[0]["fields_updated"]
+        self.assertTrue(fields & PX4Transport.HIL_SENSOR_FIELDS_ACCEL)
+        self.assertTrue(fields & PX4Transport.HIL_SENSOR_FIELDS_GYRO)
+        self.assertFalse(fields & PX4Transport.HIL_SENSOR_FIELDS_MAG)
+        self.assertFalse(fields & PX4Transport.HIL_SENSOR_FIELDS_BARO)
+        self.assertFalse(transport.hil_gps_calls)
+        clock.close()
+
+    def test_scheduler_skips_sensor_sample_read_when_no_stream_is_due(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=200.0,
+            vision_rate_hz=100.0,
+            accel_noise_std_mps2=(0.0, 0.0, 0.0),
+            gyro_noise_std_radps=0.0,
+        )
+        read_count = 0
+
+        def read_sample() -> PX4SensorSample:
+            nonlocal read_count
+            read_count += 1
+            return PX4SensorSample(
+                accel_frd=np.array([1.0, 2.0, 3.0], dtype=float),
+                gyro_frd=np.array([0.1, 0.2, 0.3], dtype=float),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=np.zeros(3, dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        self.assertEqual(read_count, 1)
+
+        clock.advance_us(1_000)
+        self.assertFalse(scheduler.update())
+
+        self.assertEqual(read_count, 1)
+        self.assertFalse(transport.hil_sensor_calls)
+        self.assertFalse(transport.vision_calls)
+        clock.close()
+
+    def test_scheduler_large_step_sends_single_current_hil_sample_without_backlog(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=200.0,
+            vision_rate_hz=100.0,
+            accel_noise_std_mps2=(0.0, 0.0, 0.0),
+            gyro_noise_std_radps=0.0,
+        )
+        accel_samples = [
+            np.array([1.0, 0.0, 0.0], dtype=float),
+            np.array([2.0, 0.0, 0.0], dtype=float),
+        ]
+
+        def read_sample() -> PX4SensorSample:
+            accel = accel_samples.pop(0) if accel_samples else np.array([9.0, 0.0, 0.0], dtype=float)
+            return PX4SensorSample(
+                accel_frd=accel,
+                gyro_frd=np.zeros(3, dtype=float),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=np.zeros(3, dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        clock.advance_us(20_000)
+        self.assertTrue(scheduler.update())
+
+        self.assertEqual(len(transport.hil_sensor_calls), 1)
+        self.assertEqual(transport.hil_sensor_calls[0]["timestamp_us"], 20_000)
+        np.testing.assert_allclose(transport.hil_sensor_calls[0]["accel_frd"], np.array([2.0, 0.0, 0.0]))
+        clock.close()
+
     @patch("acesim.utils.px4_transport.mavutil.mavlink_connection")
     def test_signed_hil_actuator_controls_are_accepted(self, mock_connection: MagicMock) -> None:
         connection = _FakeConnection()
@@ -224,6 +366,23 @@ class PX4TransportSchedulerTests(unittest.TestCase):
 
         self.assertIsNotNone(applied)
         np.testing.assert_allclose(applied, np.array([-1.0, 0.25, 1.5], dtype=float))
+        transport.close()
+
+    @patch("acesim.utils.px4_transport.mavutil.mavlink_connection")
+    def test_actuator_update_reports_whether_new_frame_was_received(self, mock_connection: MagicMock) -> None:
+        connection = _FakeConnection()
+        mock_connection.return_value = connection
+        transport = PX4Transport(PX4ActuatorParams())
+        transport._is_connected = True
+
+        self.assertFalse(transport.update_actuator_commands(sim_time_us=5_000, channel_count=2))
+
+        connection.enqueue(
+            "HIL_ACTUATOR_CONTROLS",
+            SimpleNamespace(controls=np.array([0.2, 0.7], dtype=float)),
+        )
+        self.assertTrue(transport.update_actuator_commands(sim_time_us=6_000, channel_count=2))
+        np.testing.assert_allclose(transport.read_applied_actuator_controls(2), np.array([0.2, 0.7], dtype=float))
         transport.close()
 
     def test_scheduler_sets_diff_pressure_field_when_sample_provides_it(self) -> None:
@@ -269,6 +428,31 @@ class PX4TransportSchedulerTests(unittest.TestCase):
 
         call = connection.mav.vision_calls[0]
         self.assertEqual(len(call), 7)
+        transport.close()
+
+    @patch("acesim.utils.px4_transport.mavutil.mavlink_connection")
+    def test_vision_position_estimate_converts_nwu_flu_attitude_to_ned_frd_euler(
+        self, mock_connection: MagicMock
+    ) -> None:
+        connection = _FakeConnection()
+        mock_connection.return_value = connection
+        transport = PX4Transport(PX4ActuatorParams())
+        transport._is_connected = True
+        quat_nwu_flu = Rotation.from_euler("xyz", [10.0, -20.0, 30.0], degrees=True).as_quat(scalar_first=True)
+
+        transport.send_vision_position_estimate(
+            12_345,
+            np.array([1.0, 2.0, 3.0], dtype=float),
+            quat_nwu_flu,
+        )
+
+        _, north_m, east_m, down_m, roll, pitch, yaw = connection.mav.vision_calls[0]
+        np.testing.assert_allclose([north_m, east_m, down_m], [1.0, -2.0, -3.0])
+        expected_euler = Rotation.from_quat(
+            [quat_nwu_flu[0], quat_nwu_flu[1], -quat_nwu_flu[2], -quat_nwu_flu[3]],
+            scalar_first=True,
+        ).as_euler("xyz", degrees=False)
+        np.testing.assert_allclose([roll, pitch, yaw], expected_euler, atol=1e-12)
         transport.close()
 
     def test_mocap_scheduler_does_not_override_vision_covariance(self) -> None:

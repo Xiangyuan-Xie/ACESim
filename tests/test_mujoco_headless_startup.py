@@ -29,8 +29,8 @@ class _FakePX4Transport:
     def update_connection_state(self) -> bool:
         return False
 
-    def update_actuator_commands(self, sim_time_us: int, channel_count: int) -> None:
-        return None
+    def update_actuator_commands(self, sim_time_us: int, channel_count: int) -> bool:
+        return False
 
     def read_applied_actuator_controls(self, channel_count: int):
         return None

@@ -8,6 +8,7 @@ from acesim.tools.analysis_ulog import (
     format_log_row,
     run_tui,
     summarize_motor_window,
+    summarize_px4_timing_evidence,
 )
 
 
@@ -55,6 +56,50 @@ def test_summarize_motor_window_handles_empty_windows() -> None:
     assert lines == ["empty:", "  no samples"]
 
 
+def test_summarize_px4_timing_evidence_reports_source_backed_sensor_combined_rate() -> None:
+    topics = {
+        "sensor_combined": {
+            "timestamp": np.array([0, 5_000, 10_000, 15_000], dtype=np.uint64),
+            "timestamp_sample": np.array([0, 5_000, 10_000, 15_000], dtype=np.uint64),
+        }
+    }
+
+    lines = summarize_px4_timing_evidence(topics)
+
+    joined = "\n".join(lines)
+    assert "topic=sensor_combined" in joined
+    assert "ulog_recorded_rate=200.000 Hz" in joined
+    assert "timestamp_sample_delay=0.000 ms" in joined
+    assert "recommended_sim_rate=200.000 Hz" in joined
+    assert "VehicleIMU.cpp" in joined
+    assert "confidence=high" in joined
+
+
+def test_summarize_px4_timing_evidence_marks_missing_topics_as_insufficient() -> None:
+    lines = summarize_px4_timing_evidence({})
+
+    joined = "\n".join(lines)
+    assert "topic=vehicle_visual_odometry" in joined
+    assert "ulog_recorded_rate=insufficient evidence" in joined
+    assert "confidence=insufficient" in joined
+
+
+def test_summarize_px4_timing_evidence_marks_actuator_latency_not_estimable_without_sample_timestamp() -> None:
+    topics = {
+        "actuator_outputs": {
+            "timestamp": np.array([0, 100_000, 200_000], dtype=np.uint64),
+        }
+    }
+
+    lines = summarize_px4_timing_evidence(topics)
+
+    joined = "\n".join(lines)
+    assert "topic=actuator_outputs" in joined
+    assert "ulog_recorded_rate=10.000 Hz" in joined
+    assert "timestamp_sample_delay=not estimable" in joined
+    assert "no timestamp_sample" in joined
+
+
 def test_format_log_row_shows_only_filename_and_modified_date(tmp_path) -> None:
     log_path = tmp_path / "15_34_33.ulg"
     log_path.write_text("placeholder", encoding="utf-8")
@@ -100,9 +145,9 @@ def test_run_tui_exits_after_selected_log_is_analyzed(tmp_path, monkeypatch) -> 
             return 10
 
     screen = FakeScreen()
-    monkeypatch.setattr("acesim.tools.ulog_motor_tui.curses.curs_set", lambda _visibility: None)
-    monkeypatch.setattr("acesim.tools.ulog_motor_tui.curses.wrapper", lambda callback: callback(screen))
-    monkeypatch.setattr("acesim.tools.ulog_motor_tui.analyze_log", lambda selected, output: result)
+    monkeypatch.setattr("acesim.tools.analysis_ulog.curses.curs_set", lambda _visibility: None)
+    monkeypatch.setattr("acesim.tools.analysis_ulog.curses.wrapper", lambda callback: callback(screen))
+    monkeypatch.setattr("acesim.tools.analysis_ulog.analyze_log", lambda selected, output: result)
 
     assert run_tui([log_path], output_dir) == result
     assert screen.getch_calls == 1
