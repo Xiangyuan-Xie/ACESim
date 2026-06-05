@@ -24,11 +24,11 @@ advance_scale_max = 1.10
 ground_effect_enabled = true
 ground_effect_max_scale = 1.25
 ground_effect_height_rotor_diameters = 1.0
+ground_effect_normal_min_dot = 0.5
 
 [params.downwash]
 enabled = true
 exclude_body_patterns = ["base_link", "rotor_*", "*_vis"]
-air_density = 1.225
 drag_coefficient = 1.1
 area_scale = 1.0
 wake_speed_scale = 1.0

@@ -211,6 +211,20 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         finally:
             env.close()
 
+    def test_ground_effect_support_surfaces_are_visible_by_default(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            floor_id = mujoco.mj_name2id(env._mj_model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
+            self.assertGreaterEqual(floor_id, 0)
+            floor_group = int(env._mj_model.geom_group[floor_id])
+            default_viewer_options = mujoco.MjvOption()
+
+            self.assertEqual(floor_group, 2)
+            self.assertEqual(int(default_viewer_options.geomgroup[floor_group]), 1)
+            self.assertEqual(int(env._rotor_ground_geomgroup[floor_group]), 1)
+        finally:
+            env.close()
+
     def test_px4_interactive_viewer_mode_publishes_sensors_from_control_callback(self) -> None:
         _RecordingSensorScheduler.instances.clear()
         _ConnectedFakePX4Transport.events.clear()
@@ -635,6 +649,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                     "type": "box",
                     "size": "0.5 0.5 0.02",
                     "pos": "0 0 0.20",
+                    "group": "2",
                     "contype": "1",
                     "conaffinity": "1",
                 },
@@ -672,6 +687,54 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         finally:
             env.close()
 
+    def test_multicopter_ground_effect_ignores_unmarked_support_surfaces(self) -> None:
+        original_merge = MJEnv._merge_scene_robot_xml
+
+        def merge_with_unmarked_platform(self: MJEnv, scene_path: Path, robot_path: Path) -> str:
+            root = ET.fromstring(original_merge(self, scene_path, robot_path))
+            worldbody = root.find("worldbody")
+            assert worldbody is not None
+            ET.SubElement(
+                worldbody,
+                "geom",
+                {
+                    "name": "unmarked_platform",
+                    "type": "box",
+                    "size": "0.5 0.5 0.02",
+                    "pos": "0 0 0.20",
+                    "group": "0",
+                    "contype": "1",
+                    "conaffinity": "1",
+                },
+            )
+            return ET.tostring(root, encoding="unicode")
+
+        with patch.object(MJEnv, "_merge_scene_robot_xml", merge_with_unmarked_platform):
+            env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            self._seed_kinematics(env, pos=np.array([0.0, 0.0, 1.0]), linvel=np.zeros(3))
+            env._rotor_angular_velocity[:] = 500.0
+            rb = Rotation.identity()
+
+            _, _, high_thrusts, _, _ = env._compute_rotor_wrenches(
+                np.array([0.0, 0.0, 1.0], dtype=float),
+                rb,
+                rb.inv(),
+                np.zeros(3, dtype=float),
+                np.zeros(3, dtype=float),
+            )
+            _, _, low_thrusts, _, _ = env._compute_rotor_wrenches(
+                np.array([0.0, 0.0, 0.35], dtype=float),
+                rb,
+                rb.inv(),
+                np.zeros(3, dtype=float),
+                np.zeros(3, dtype=float),
+            )
+
+            np.testing.assert_allclose(low_thrusts, high_thrusts)
+        finally:
+            env.close()
+
     def test_multicopter_ground_effect_raycast_uses_current_pose_without_frequency_cache(self) -> None:
         env = MCEnv(ConfigLoader(_config_path("default")))
         try:
@@ -689,10 +752,11 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 flg_static: int,
                 bodyexclude: int,
                 geomid: np.ndarray,
-                cutoff: object,
+                normal: np.ndarray,
             ) -> float:
-                del model, data, pnt, vec, geomgroup, flg_static, bodyexclude, cutoff
+                del model, data, pnt, vec, geomgroup, flg_static, bodyexclude
                 geomid[0] = 0
+                normal[:] = np.array([0.0, 0.0, 1.0], dtype=float)
                 return ray_distances.pop(0) if ray_distances else 0.20
 
             with patch("acesim.env.mujoco.mc_env.mujoco.mj_ray", side_effect=fake_ray) as ray:
@@ -714,6 +778,50 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
 
             self.assertGreaterEqual(ray.call_count, 2)
             self.assertGreater(float(first_thrusts[0]), float(second_thrusts[0]))
+        finally:
+            env.close()
+
+    def test_multicopter_ground_effect_uses_mujoco_ray_normal_filter(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            self._seed_kinematics(env, pos=np.array([0.0, 0.0, 0.30]), linvel=np.zeros(3))
+            env._rotor_angular_velocity[:] = 500.0
+            rb = Rotation.identity()
+
+            _, _, baseline_thrusts, _, _ = env._compute_rotor_wrenches(
+                np.array([0.0, 0.0, 1.0], dtype=float),
+                rb,
+                rb.inv(),
+                np.zeros(3, dtype=float),
+                np.zeros(3, dtype=float),
+            )
+
+            def side_wall_ray(
+                model: object,
+                data: object,
+                pnt: np.ndarray,
+                vec: np.ndarray,
+                geomgroup: object,
+                flg_static: int,
+                bodyexclude: int,
+                geomid: np.ndarray,
+                normal: np.ndarray,
+            ) -> float:
+                del model, data, pnt, vec, geomgroup, flg_static, bodyexclude
+                geomid[0] = 0
+                normal[:] = np.array([1.0, 0.0, 0.0], dtype=float)
+                return 0.05
+
+            with patch("acesim.env.mujoco.mc_env.mujoco.mj_ray", side_effect=side_wall_ray):
+                _, _, side_wall_thrusts, _, _ = env._compute_rotor_wrenches(
+                    np.array([0.0, 0.0, 0.30], dtype=float),
+                    rb,
+                    rb.inv(),
+                    np.zeros(3, dtype=float),
+                    np.zeros(3, dtype=float),
+                )
+
+                np.testing.assert_allclose(side_wall_thrusts, baseline_thrusts)
         finally:
             env.close()
 
@@ -773,19 +881,17 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         finally:
             env.close()
 
-    def test_multicopter_projected_body_area_prefers_collision_geoms(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="acesim_projected_area_") as tmpdir:
+    def test_multicopter_aero_surface_samples_prefer_collision_geoms(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="acesim_aero_samples_") as tmpdir:
             env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
             try:
                 link_id = int(env._downwash_body_ids[0])
-                area = env._estimate_body_projected_area(
-                    link_id,
-                    np.array([0.0, 0.0, -1.0], dtype=float),
-                )
-                selected_geom_ids = env._select_downwash_geom_ids(link_id)
+                samples = env._aero_surface_samples_by_body[link_id]
+                selected_geom_ids = env._select_aero_geom_ids(link_id)
 
-                self.assertGreater(area, 0.0)
-                self.assertTrue(selected_geom_ids)
+                self.assertGreater(samples.points_b.shape[0], 0)
+                self.assertEqual(samples.points_b.shape, samples.normals_b.shape)
+                self.assertEqual(samples.areas.shape, (samples.points_b.shape[0],))
                 self.assertTrue(
                     all(
                         env._mj_model.geom_contype[geom_id] != 0 or env._mj_model.geom_conaffinity[geom_id] != 0
@@ -795,61 +901,57 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             finally:
                 env.close()
 
-    def test_multicopter_projected_body_area_reuses_cached_downwash_geometry(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="acesim_projected_area_cache_") as tmpdir:
+    def test_multicopter_mesh_surface_samples_use_compiled_mujoco_faces(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="acesim_mesh_face_samples_") as tmpdir:
             env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
             try:
-                link_id = int(env._downwash_body_ids[0])
-                self.assertIn(link_id, env._downwash_body_geom_point_offsets)
-                with patch.object(env, "_select_downwash_geom_ids", wraps=env._select_downwash_geom_ids) as select_ids:
-                    first_area = env._estimate_body_projected_area(link_id, np.array([0.0, 0.0, -1.0], dtype=float))
-                    second_area = env._estimate_body_projected_area(link_id, np.array([1.0, 0.0, 0.0], dtype=float))
+                link_id = env._downwash_body_ids[0]
+                mesh_geom_id = next(
+                    geom_id
+                    for geom_id in env._select_aero_geom_ids(link_id)
+                    if int(env._mj_model.geom_type[geom_id]) == int(mujoco.mjtGeom.mjGEOM_MESH)
+                )
 
-                self.assertGreater(first_area, 0.0)
-                self.assertGreater(second_area, 0.0)
-                select_ids.assert_not_called()
+                points_b, normals_b, areas = env._geom_surface_samples_local(mesh_geom_id)
+                mesh_id = int(env._mj_model.geom_dataid[mesh_geom_id])
+                face_start = int(env._mj_model.mesh_faceadr[mesh_id])
+                face_count = int(env._mj_model.mesh_facenum[mesh_id])
+                vert_start = int(env._mj_model.mesh_vertadr[mesh_id])
+                vertices = np.asarray(env._mj_model.mesh_vert, dtype=float)
+                local_faces = np.asarray(env._mj_model.mesh_face[face_start : face_start + face_count], dtype=int)
+                triangles = vertices[vert_start + local_faces]
+                area_vectors = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+                expected_areas = 0.5 * np.linalg.norm(area_vectors, axis=1)
+                expected_area_sum = float(np.sum(expected_areas[expected_areas > 1e-12]))
+
+                self.assertGreater(points_b.shape[0], 0)
+                self.assertEqual(points_b.shape, normals_b.shape)
+                self.assertTrue(np.all(areas > 0.0))
+                np.testing.assert_allclose(float(np.sum(areas)), expected_area_sum, rtol=1e-12, atol=1e-12)
+                normal_lengths = np.linalg.norm(normals_b, axis=1)
+                np.testing.assert_allclose(normal_lengths, np.ones_like(normal_lengths), atol=1e-12)
             finally:
                 env.close()
 
-    def test_multicopter_projected_body_area_uses_cached_convex_projection_hull(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="acesim_projected_area_hull_cache_") as tmpdir:
+    def test_multicopter_aero_surface_samples_are_area_coalesced_for_runtime(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="acesim_aero_samples_coalesced_") as tmpdir:
             env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
             try:
-                link_id = int(env._downwash_body_ids[0])
-                self.assertIn(link_id, env._downwash_body_projection_hulls)
+                sample_count = sum(samples.points_b.shape[0] for samples in env._aero_surface_samples_by_body.values())
+                total_area = 0.0
+                coalesced_area = 0.0
+                for body_id, samples in env._aero_surface_samples_by_body.items():
+                    coalesced_area += float(np.sum(samples.areas))
+                    for geom_id in env._select_aero_geom_ids(body_id):
+                        _, _, geom_areas = env._geom_surface_samples_local(geom_id)
+                        total_area += float(np.sum(geom_areas))
 
-                with patch.object(env, "_convex_hull_area_2d", side_effect=AssertionError("slow path used")):
-                    area = env._estimate_body_projected_area(
-                        link_id,
-                        np.array([0.2, -0.4, -1.0], dtype=float),
-                    )
-
-                self.assertGreater(area, 0.0)
+                self.assertLess(sample_count, 2500)
+                np.testing.assert_allclose(coalesced_area, total_area, rtol=1e-12, atol=1e-12)
             finally:
                 env.close()
 
-    def test_multicopter_cached_projected_area_matches_slow_projection_for_rotated_body(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="acesim_projected_area_cache_match_") as tmpdir:
-            env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
-            try:
-                link_id = int(env._downwash_body_ids[0])
-                direction_w = np.array([0.3, -0.4, -1.0], dtype=float)
-                joint_id = env._mj_model.joint("joint_1").id
-                env._mj_data.qpos[env._mj_model.jnt_qposadr[joint_id]] = 0.7
-                mujoco.mj_forward(env._mj_model, env._mj_data)
-
-                cached_area = env._estimate_body_projected_area(link_id, direction_w)
-                saved_hull = env._downwash_body_projection_hulls.pop(link_id)
-                try:
-                    slow_area = env._estimate_body_projected_area(link_id, direction_w)
-                finally:
-                    env._downwash_body_projection_hulls[link_id] = saved_hull
-
-                np.testing.assert_allclose(cached_area, slow_area, rtol=1e-10, atol=1e-12)
-            finally:
-                env.close()
-
-    def test_multicopter_downwash_does_not_rebuild_projected_area_hulls_each_step(self) -> None:
+    def test_multicopter_downwash_does_not_rebuild_surface_samples_each_step(self) -> None:
         with tempfile.TemporaryDirectory(prefix="acesim_downwash_hull_cache_") as tmpdir:
             env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
             try:
@@ -864,7 +966,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                     omega_w,
                 )
 
-                with patch.object(env, "_convex_hull_area_2d", side_effect=AssertionError("slow path used")):
+                with patch.object(env, "_select_aero_geom_ids", side_effect=AssertionError("rebuild used")):
                     env._apply_downwash_forces(rotor_positions_w, rotor_thrusts, rotor_axes_w=rotor_axes_w)
             finally:
                 env.close()
@@ -875,14 +977,16 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             try:
                 body_id = env._downwash_body_ids[0]
                 rotor_pos_w = env._mj_data.xpos[env._rotor_body_ids[0]].copy()
-                env._mj_data.xipos[body_id] = rotor_pos_w + np.array([0.0, 0.0, -0.20], dtype=float)
+                body_pos_w = rotor_pos_w + np.array([0.0, 0.0, -0.20], dtype=float)
+                env._mj_data.xpos[body_id] = body_pos_w
+                env._mj_data.xipos[body_id] = body_pos_w
 
-                force_w = env._compute_downwash_force_for_body(
-                    body_id,
+                force_w, _ = env._compute_downwash_wrenches_for_bodies(
+                    [body_id],
                     np.asarray([rotor_pos_w], dtype=float),
                     np.asarray([3.0], dtype=float),
                     rotor_axes_w=np.asarray([[0.0, 0.0, 1.0]], dtype=float),
-                )
+                )[body_id]
 
                 self.assertLess(float(force_w[2]), 0.0)
             finally:
@@ -896,26 +1000,31 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 body_id = env._downwash_body_ids[0]
                 rotor_pos_w = env._mj_data.xpos[env._rotor_body_ids[0]].copy()
                 body_pos_w = rotor_pos_w + np.array([0.0, 0.0, -0.20], dtype=float)
+                env._mj_data.xpos[body_id] = body_pos_w
                 env._mj_data.xipos[body_id] = body_pos_w
+                env._mj_data.xmat[body_id] = np.eye(3).reshape(9)
                 thrust = 3.0
 
-                with (
-                    patch.object(env, "_estimate_body_projected_area", return_value=0.02),
-                    patch("acesim.env.mujoco.mc_env.mujoco.mj_jacBodyCom"),
-                ):
-                    force_w = env._compute_downwash_force_for_body(
-                        body_id,
-                        np.asarray([rotor_pos_w], dtype=float),
-                        np.asarray([thrust], dtype=float),
-                    )
+                samples = env._aero_surface_samples_by_body[body_id]
+                env._aero_surface_samples_by_body[body_id] = type(samples)(
+                    points_b=np.zeros((1, 3), dtype=float),
+                    normals_b=np.array([[0.0, 0.0, 1.0]], dtype=float),
+                    areas=np.array([0.04], dtype=float),
+                )
+                force_w, _ = env._compute_downwash_wrenches_for_bodies(
+                    [body_id],
+                    np.asarray([rotor_pos_w], dtype=float),
+                    np.asarray([thrust], dtype=float),
+                )[body_id]
 
                 disk_area = np.pi * env._params.rotor_radius**2
-                wake_speed = params.wake_speed_scale * np.sqrt(2.0 * thrust / (params.air_density * disk_area))
+                air_density = env._mj_model.opt.density
+                wake_speed = params.wake_speed_scale * np.sqrt(2.0 * thrust / (air_density * disk_area))
                 axial_decay = np.exp(-0.20 / params.axial_decay_m)
                 wake_w = wake_speed * axial_decay * np.array([0.0, 0.0, -1.0], dtype=float)
                 expected = (
                     0.5
-                    * params.air_density
+                    * air_density
                     * params.drag_coefficient
                     * params.area_scale
                     * 0.02
@@ -926,35 +1035,129 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             finally:
                 env.close()
 
+    def test_multicopter_downwash_samples_use_body_origin_and_torque_uses_com(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="acesim_downwash_origin_com_") as tmpdir:
+            env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
+            try:
+                body_id = env._downwash_body_ids[0]
+                samples = env._aero_surface_samples_by_body[body_id]
+                env._aero_surface_samples_by_body[body_id] = type(samples)(
+                    points_b=np.array([[0.40, 0.0, 0.0]], dtype=float),
+                    normals_b=np.array([[0.0, 0.0, 1.0]], dtype=float),
+                    areas=np.array([0.04], dtype=float),
+                )
+                env._mj_data.xpos[body_id] = np.array([0.0, 0.0, 0.0], dtype=float)
+                env._mj_data.xipos[body_id] = np.array([0.20, 0.0, 0.0], dtype=float)
+                env._mj_data.xmat[body_id] = np.eye(3).reshape(9)
+                rotor_positions_w = np.array([[0.40, 0.0, 0.20]], dtype=float)
+                rotor_thrusts = np.array([3.0], dtype=float)
+                rotor_axes_w = np.array([[0.0, 0.0, 1.0]], dtype=float)
+
+                force_w, torque_w = env._compute_downwash_wrenches_for_bodies(
+                    [body_id],
+                    rotor_positions_w,
+                    rotor_thrusts,
+                    rotor_axes_w=rotor_axes_w,
+                )[body_id]
+
+                self.assertLess(float(force_w[2]), 0.0)
+                np.testing.assert_allclose(
+                    torque_w,
+                    np.cross(np.array([0.20, 0.0, 0.0], dtype=float), force_w),
+                    rtol=1e-12,
+                    atol=1e-12,
+                )
+            finally:
+                env.close()
+
+    def test_multicopter_downwash_force_is_zero_when_mjcf_density_is_zero(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="acesim_downwash_density_zero_") as tmpdir:
+            env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
+            try:
+                env._mj_model.opt.density = 0.0
+                body_id = env._downwash_body_ids[0]
+                rotor_pos_w = env._mj_data.xpos[env._rotor_body_ids[0]].copy()
+                body_pos_w = rotor_pos_w + np.array([0.0, 0.0, -0.20], dtype=float)
+                env._mj_data.xpos[body_id] = body_pos_w
+                env._mj_data.xipos[body_id] = body_pos_w
+
+                force_w, _ = env._compute_downwash_wrenches_for_bodies(
+                    [body_id],
+                    np.asarray([rotor_pos_w], dtype=float),
+                    np.asarray([3.0], dtype=float),
+                )[body_id]
+
+                np.testing.assert_allclose(force_w, np.zeros(3, dtype=float))
+            finally:
+                env.close()
+
+    def test_multicopter_downwash_surface_samples_generate_local_torque(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="acesim_downwash_surface_torque_") as tmpdir:
+            env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
+            try:
+                body_id = env._downwash_body_ids[0]
+                samples = env._aero_surface_samples_by_body[body_id]
+                env._aero_surface_samples_by_body[body_id] = type(samples)(
+                    points_b=np.array([[0.10, 0.0, 0.0], [0.40, 0.0, 0.0]], dtype=float),
+                    normals_b=np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], dtype=float),
+                    areas=np.array([0.0, 0.02], dtype=float),
+                )
+                env._mj_data.xpos[body_id] = np.array([0.0, 0.0, 0.0], dtype=float)
+                env._mj_data.xipos[body_id] = np.array([0.0, 0.0, 0.0], dtype=float)
+                env._mj_data.xmat[body_id] = np.eye(3).reshape(9)
+                rotor_positions_w = np.array([[0.40, 0.0, 0.20]], dtype=float)
+                rotor_thrusts = np.array([3.0], dtype=float)
+                rotor_axes_w = np.array([[0.0, 0.0, 1.0]], dtype=float)
+
+                force_w, torque_w = env._compute_downwash_wrenches_for_bodies(
+                    [body_id],
+                    rotor_positions_w,
+                    rotor_thrusts,
+                    rotor_axes_w=rotor_axes_w,
+                )[body_id]
+
+                self.assertLess(float(force_w[2]), 0.0)
+                self.assertGreater(float(torque_w[1]), 0.0)
+            finally:
+                env.close()
+
     def test_multicopter_downwash_force_reduces_when_body_moves_with_wake(self) -> None:
         with tempfile.TemporaryDirectory(prefix="acesim_downwash_velocity_") as tmpdir:
             env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
             try:
                 body_id = env._downwash_body_ids[0]
                 rotor_pos_w = env._mj_data.xpos[env._rotor_body_ids[0]].copy()
-                env._mj_data.xipos[body_id] = rotor_pos_w + np.array([0.0, 0.0, -0.20], dtype=float)
+                body_pos_w = rotor_pos_w + np.array([0.0, 0.0, -0.20], dtype=float)
+                env._mj_data.xpos[body_id] = body_pos_w
+                env._mj_data.xipos[body_id] = body_pos_w
                 rotor_positions_w = np.asarray([rotor_pos_w], dtype=float)
                 rotor_thrusts = np.asarray([3.0], dtype=float)
+                samples = env._aero_surface_samples_by_body[body_id]
+                env._aero_surface_samples_by_body[body_id] = type(samples)(
+                    points_b=np.zeros((1, 3), dtype=float),
+                    normals_b=np.array([[0.0, 0.0, 1.0]], dtype=float),
+                    areas=np.array([0.04], dtype=float),
+                )
 
-                def stationary_jacobian(
-                    model: object, data: object, jacp: np.ndarray, jacr: np.ndarray, body: int
-                ) -> None:
-                    return None
-
-                def moving_jacobian(model: object, data: object, jacp: np.ndarray, jacr: np.ndarray, body: int) -> None:
-                    jacp[:, 0:3] = np.eye(3)
-
-                with (
-                    patch.object(env, "_estimate_body_projected_area", return_value=0.02),
-                    patch("acesim.env.mujoco.mc_env.mujoco.mj_jacBodyCom", side_effect=stationary_jacobian),
-                ):
-                    stationary_force_w = env._compute_downwash_force_for_body(body_id, rotor_positions_w, rotor_thrusts)
-                env._mj_data.qvel[0:3] = np.array([0.0, 0.0, -4.0], dtype=float)
-                with (
-                    patch.object(env, "_estimate_body_projected_area", return_value=0.02),
-                    patch("acesim.env.mujoco.mc_env.mujoco.mj_jacBodyCom", side_effect=moving_jacobian),
-                ):
-                    moving_force_w = env._compute_downwash_force_for_body(body_id, rotor_positions_w, rotor_thrusts)
+                env._mj_data.qvel[:] = 0.0
+                stationary_force_w, _ = env._compute_downwash_wrenches_for_bodies(
+                    [body_id],
+                    rotor_positions_w,
+                    rotor_thrusts,
+                )[body_id]
+                env._mj_data.qvel[:] = 0.0
+                env._mj_data.qvel[:3] = np.array([0.0, 0.0, -4.0], dtype=float)
+                with patch.object(mujoco, "mj_jacBodyCom") as jac_body_com:
+                    jac_body_com.side_effect = lambda _model, _data, jacp, jacr, _body_id: (
+                        jacp.__setitem__(slice(None), 0.0),
+                        jacr.__setitem__(slice(None), 0.0),
+                        jacp.__setitem__((slice(None), slice(0, 3)), np.eye(3)),
+                    )
+                    moving_force_w, _ = env._compute_downwash_wrenches_for_bodies(
+                        [body_id],
+                        rotor_positions_w,
+                        rotor_thrusts,
+                    )[body_id]
 
                 self.assertLess(np.linalg.norm(moving_force_w), np.linalg.norm(stationary_force_w))
             finally:
@@ -967,7 +1170,9 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 params = env._downwash_params
                 body_id = env._downwash_body_ids[0]
                 body_pos_w = np.array([0.0, 0.0, 0.0], dtype=float)
+                env._mj_data.xpos[body_id] = body_pos_w
                 env._mj_data.xipos[body_id] = body_pos_w
+                env._mj_data.xmat[body_id] = np.eye(3).reshape(9)
                 env._mj_model.opt.wind[:] = np.array([2.0, 0.0, 0.0], dtype=float)
                 rotor_positions_w = np.array(
                     [
@@ -978,22 +1183,23 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 )
                 rotor_thrusts = np.array([3.0, 3.0], dtype=float)
                 rotor_axes_w = np.tile(np.array([[0.0, 0.0, 1.0]], dtype=float), (2, 1))
+                samples = env._aero_surface_samples_by_body[body_id]
+                env._aero_surface_samples_by_body[body_id] = type(samples)(
+                    points_b=np.zeros((1, 3), dtype=float),
+                    normals_b=np.array([[0.0, 0.0, 1.0]], dtype=float),
+                    areas=np.array([0.04], dtype=float),
+                )
 
-                with (
-                    patch.object(env, "_estimate_body_projected_area", return_value=0.02),
-                    patch("acesim.env.mujoco.mc_env.mujoco.mj_jacBodyCom"),
-                ):
-                    force_w = env._compute_downwash_force_for_body(
-                        body_id,
-                        rotor_positions_w,
-                        rotor_thrusts,
-                        rotor_axes_w=rotor_axes_w,
-                    )
+                force_w, _ = env._compute_downwash_wrenches_for_bodies(
+                    [body_id],
+                    rotor_positions_w,
+                    rotor_thrusts,
+                    rotor_axes_w=rotor_axes_w,
+                )[body_id]
 
                 disk_area = np.pi * env._params.rotor_radius**2
-                wake_speed = params.wake_speed_scale * np.sqrt(
-                    2.0 * rotor_thrusts[0] / (params.air_density * disk_area)
-                )
+                air_density = env._mj_model.opt.density
+                wake_speed = params.wake_speed_scale * np.sqrt(2.0 * rotor_thrusts[0] / (air_density * disk_area))
                 expected_wake = np.zeros(3, dtype=float)
                 for rotor_pos_w in rotor_positions_w:
                     delta_w = body_pos_w - rotor_pos_w
@@ -1004,12 +1210,13 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                     axial_decay = np.exp(-axial_distance / params.axial_decay_m)
                     expected_wake += wake_speed * profile * axial_decay * np.array([0.0, 0.0, -1.0], dtype=float)
                 v_rel_w = env._mj_model.opt.wind.copy() + expected_wake
+                projected_area = 0.5 * 0.04 * abs(float(v_rel_w[2]) / float(np.linalg.norm(v_rel_w)))
                 expected = (
                     0.5
-                    * params.air_density
+                    * air_density
                     * params.drag_coefficient
                     * params.area_scale
-                    * 0.02
+                    * projected_area
                     * np.linalg.norm(v_rel_w)
                     * v_rel_w
                 )
@@ -1024,6 +1231,7 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             try:
                 body_id = env._downwash_body_ids[0]
                 body_pos_w = np.array([0.0, 0.0, 0.0], dtype=float)
+                env._mj_data.xpos[body_id] = body_pos_w
                 env._mj_data.xipos[body_id] = body_pos_w
                 rotor_positions_w = np.array(
                     [
@@ -1036,15 +1244,12 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 for rotor_idx, rotor_body_id in enumerate(env._rotor_body_ids[:2]):
                     env._mj_data.xquat[rotor_body_id] = Rotation.identity().as_quat(scalar_first=True)
 
-                with (
-                    patch.object(env, "_estimate_body_projected_area", return_value=0.02),
-                    patch.object(
-                        mujoco,
-                        "mj_jacBodyCom",
-                        wraps=mujoco.mj_jacBodyCom,
-                    ) as velocity,
-                ):
-                    env._compute_downwash_force_for_body(body_id, rotor_positions_w, rotor_thrusts)
+                with patch.object(
+                    mujoco,
+                    "mj_jacBodyCom",
+                    wraps=mujoco.mj_jacBodyCom,
+                ) as velocity:
+                    env._compute_downwash_wrenches_for_bodies([body_id], rotor_positions_w, rotor_thrusts)
 
                 velocity.assert_called_once()
             finally:
@@ -1055,18 +1260,16 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             env = MCEnv(ConfigLoader(_write_mujoco_config(Path(tmpdir), env_type="mc", asset_name="x500_arm2x")))
             try:
                 body_id = env._downwash_body_ids[0]
+                env._mj_data.xpos[body_id] = np.array([0.0, 0.0, 0.0], dtype=float)
                 env._mj_data.xipos[body_id] = np.array([0.0, 0.0, 0.0], dtype=float)
                 rotor_positions_w = np.array([[0.0, 0.0, 0.20]], dtype=float)
                 rotor_thrusts = np.array([3.0], dtype=float)
 
-                with (
-                    patch.object(env, "_estimate_body_projected_area", return_value=0.02),
-                    patch.object(mujoco, "mj_jacBodyCom", wraps=mujoco.mj_jacBodyCom) as velocity,
-                ):
-                    env._compute_downwash_force_for_body(body_id, rotor_positions_w, rotor_thrusts)
+                with patch.object(mujoco, "mj_jacBodyCom", wraps=mujoco.mj_jacBodyCom) as velocity:
+                    env._compute_downwash_wrenches_for_bodies([body_id], rotor_positions_w, rotor_thrusts)
                     first_jacp = velocity.call_args.args[2]
                     first_jacr = velocity.call_args.args[3]
-                    env._compute_downwash_force_for_body(body_id, rotor_positions_w, rotor_thrusts)
+                    env._compute_downwash_wrenches_for_bodies([body_id], rotor_positions_w, rotor_thrusts)
                     second_jacp = velocity.call_args.args[2]
                     second_jacr = velocity.call_args.args[3]
 
@@ -1074,14 +1277,6 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 self.assertIs(first_jacr, second_jacr)
             finally:
                 env.close()
-
-    def test_multicopter_convex_hull_area_handles_large_projected_point_clouds(self) -> None:
-        angles = np.linspace(0.0, 2.0 * np.pi, 2048, endpoint=False)
-        points = np.column_stack((np.cos(angles), np.sin(angles)))
-
-        area = MCEnv._convex_hull_area_2d(points)
-
-        self.assertAlmostEqual(area, np.pi, delta=0.01)
 
     def test_multicopter_downwash_applies_force_to_configured_scene_bodies(self) -> None:
         with tempfile.TemporaryDirectory(prefix="acesim_downwash_") as tmpdir:
@@ -1109,9 +1304,46 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 ]
                 self.assertTrue(downwash_calls)
                 self.assertTrue(any(float(call.args[2][2]) < 0.0 for call in downwash_calls))
+                self.assertTrue(any(np.linalg.norm(call.args[3]) > 0.0 for call in downwash_calls))
                 self.assertTrue(all(int(call.args[5]) != env._base_link_id for call in downwash_calls))
             finally:
                 env.close()
+
+    def test_multicopter_rotor_inertial_torque_is_disabled_by_default_and_analytical_when_enabled(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            self.assertFalse(env._rotor_inertial_torque_active)
+            rotor_axes_w = np.array([[0.0, 0.0, 1.0]], dtype=float)
+            torque_w = env._compute_rotor_inertial_torque_w(
+                rotor_idx=0,
+                rotor_axis_w=rotor_axes_w[0],
+                omega_w=np.array([1.0, 0.0, 0.0], dtype=float),
+            )
+            np.testing.assert_allclose(torque_w, np.zeros(3, dtype=float))
+
+            env._rotor_inertial_torque_active = True
+            env._rotor_inertial_torque_params = type(env._rotor_inertial_torque_params)(
+                enabled=True,
+                inertia_kg_m2=2.0e-5,
+                apply_acceleration_torque=True,
+                apply_gyro_torque=True,
+                randomize_enabled=False,
+                enabled_probability=1.0,
+            )
+            env._rotor_angular_velocity[0] = 500.0
+            env._rotor_angular_acceleration[0] = 1000.0
+            env._rotor_direction[0] = 1.0
+
+            torque_w = env._compute_rotor_inertial_torque_w(
+                rotor_idx=0,
+                rotor_axis_w=rotor_axes_w[0],
+                omega_w=np.array([1.0, 0.0, 0.0], dtype=float),
+            )
+
+            expected = np.array([0.0, 0.01, -0.02], dtype=float)
+            np.testing.assert_allclose(torque_w, expected)
+        finally:
+            env.close()
 
     def test_multicopter_downwash_body_force_does_not_feed_back_into_rotor_thrust(self) -> None:
         with tempfile.TemporaryDirectory(prefix="acesim_downwash_one_way_") as tmpdir:
@@ -1128,18 +1360,16 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                     omega_w,
                 )
                 body_id = env._downwash_body_ids[0]
-                env._mj_data.xipos[body_id] = rotor_positions_w[0] + np.array([0.0, 0.0, -0.20], dtype=float)
+                body_pos_w = rotor_positions_w[0] + np.array([0.0, 0.0, -0.20], dtype=float)
+                env._mj_data.xpos[body_id] = body_pos_w
+                env._mj_data.xipos[body_id] = body_pos_w
 
-                with (
-                    patch.object(env, "_estimate_body_projected_area", return_value=0.02),
-                    patch("acesim.env.mujoco.mc_env.mujoco.mj_jacBodyCom"),
-                ):
-                    body_force_w = env._compute_downwash_force_for_body(
-                        body_id,
-                        rotor_positions_w,
-                        baseline_thrusts,
-                        rotor_axes_w=rotor_axes_w,
-                    )
+                body_force_w, _ = env._compute_downwash_wrenches_for_bodies(
+                    [body_id],
+                    rotor_positions_w,
+                    baseline_thrusts,
+                    rotor_axes_w=rotor_axes_w,
+                )[body_id]
                 _, _, thrusts_with_body_in_wake, _, _ = env._compute_rotor_wrenches(
                     base_pos,
                     rb,
@@ -1186,16 +1416,21 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                     v_com_w,
                     omega_w,
                 )
-                original_positions = {body_id: env._mj_data.xipos[body_id].copy() for body_id in env._downwash_body_ids}
+                original_positions = {
+                    body_id: (env._mj_data.xpos[body_id].copy(), env._mj_data.xipos[body_id].copy())
+                    for body_id in env._downwash_body_ids
+                }
                 for body_id in env._downwash_body_ids:
+                    env._mj_data.xpos[body_id] = np.array([20.0, 20.0, 20.0], dtype=float)
                     env._mj_data.xipos[body_id] = np.array([20.0, 20.0, 20.0], dtype=float)
 
                 with patch("acesim.env.mujoco.mc_env.mujoco.mj_applyFT") as apply_ft:
                     env._apply_downwash_forces(rotor_positions_w, rotor_thrusts, rotor_axes_w=rotor_axes_w)
 
                 self.assertFalse(apply_ft.called)
-                for body_id, original_pos in original_positions.items():
-                    env._mj_data.xipos[body_id] = original_pos
+                for body_id, (original_origin, original_com) in original_positions.items():
+                    env._mj_data.xpos[body_id] = original_origin
+                    env._mj_data.xipos[body_id] = original_com
             finally:
                 env.close()
 
@@ -1214,15 +1449,12 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                     omega_w,
                 )
                 for body_id in env._downwash_body_ids:
+                    env._mj_data.xpos[body_id] = np.array([20.0, 20.0, 20.0], dtype=float)
                     env._mj_data.xipos[body_id] = np.array([20.0, 20.0, 20.0], dtype=float)
 
-                with (
-                    patch.object(env, "_estimate_body_projected_area", wraps=env._estimate_body_projected_area) as area,
-                    patch.object(mujoco, "mj_jacBodyCom", wraps=mujoco.mj_jacBodyCom) as velocity,
-                ):
+                with patch.object(mujoco, "mj_jacBodyCom", wraps=mujoco.mj_jacBodyCom) as velocity:
                     env._apply_downwash_forces(rotor_positions_w, rotor_thrusts, rotor_axes_w=rotor_axes_w)
 
-                area.assert_not_called()
                 velocity.assert_not_called()
             finally:
                 env.close()
@@ -1324,6 +1556,14 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             _, yaw_moment = env._compute_aero_wrench()
             self.assertGreater(abs(yaw_moment[2]), 1e-4)
             self.assertGreater(env._read_diff_pressure_hpa() or 0.0, 0.0)
+
+            env._mj_model.opt.wind[:] = np.array([15.0, 0.0, 0.0], dtype=float)
+            body_velocity_flu, _ = env._compute_apparent_body_velocity()
+            np.testing.assert_allclose(body_velocity_flu, np.zeros(3, dtype=float), atol=1e-12)
+            aero_force_b, aero_moment_b = env._compute_aero_wrench()
+            np.testing.assert_allclose(aero_force_b, np.zeros(3, dtype=float), atol=1e-12)
+            np.testing.assert_allclose(aero_moment_b, np.zeros(3, dtype=float), atol=1e-12)
+            self.assertAlmostEqual(env._read_diff_pressure_hpa() or 0.0, 0.0)
         finally:
             env.close()
 
@@ -1411,6 +1651,13 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             body_velocity_flu, _ = env._compute_apparent_body_velocity()
             prop_force_b, _ = env._compute_propeller_force(body_velocity_flu)
             self.assertGreater(prop_force_b[0], 0.0)
+
+            env._mj_model.opt.wind[:] = np.array([18.0, 0.0, 0.0], dtype=float)
+            body_velocity_flu, _ = env._compute_apparent_body_velocity()
+            np.testing.assert_allclose(body_velocity_flu, np.zeros(3, dtype=float), atol=1e-12)
+            aero_force_b, aero_moment_b = env._compute_aero_wrench()
+            np.testing.assert_allclose(aero_force_b, np.zeros(3, dtype=float), atol=1e-12)
+            np.testing.assert_allclose(aero_moment_b, np.zeros(3, dtype=float), atol=1e-12)
         finally:
             env.close()
 

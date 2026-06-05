@@ -47,6 +47,7 @@ class RotorFlowParams:
     ground_effect_enabled: bool
     ground_effect_max_scale: float
     ground_effect_height_rotor_diameters: float
+    ground_effect_normal_min_dot: float
 
     @classmethod
     def from_config(cls, config: dict[str, object] | None) -> "RotorFlowParams":
@@ -60,6 +61,7 @@ class RotorFlowParams:
                 ground_effect_enabled=False,
                 ground_effect_max_scale=1.0,
                 ground_effect_height_rotor_diameters=0.0,
+                ground_effect_normal_min_dot=0.5,
             )
 
         def parse_float(key: str, default: float) -> float:
@@ -83,6 +85,9 @@ class RotorFlowParams:
         ground_effect_height_rotor_diameters = parse_float("ground_effect_height_rotor_diameters", 1.0)
         if ground_effect_height_rotor_diameters < 0.0:
             raise ValueError("ground_effect_height_rotor_diameters must be >= 0.0")
+        ground_effect_normal_min_dot = parse_float("ground_effect_normal_min_dot", 0.5)
+        if ground_effect_normal_min_dot < -1.0 or ground_effect_normal_min_dot > 1.0:
+            raise ValueError("ground_effect_normal_min_dot must be in [-1.0, 1.0]")
         return cls(
             enabled=bool(config.get("enabled", False)),
             advance_c_lambda=parse_float("advance_c_lambda", 0.0),
@@ -92,6 +97,7 @@ class RotorFlowParams:
             ground_effect_enabled=bool(config.get("ground_effect_enabled", True)),
             ground_effect_max_scale=ground_effect_max_scale,
             ground_effect_height_rotor_diameters=ground_effect_height_rotor_diameters,
+            ground_effect_normal_min_dot=ground_effect_normal_min_dot,
         )
 
 
@@ -101,7 +107,6 @@ class DownwashParams:
 
     enabled: bool
     exclude_body_patterns: tuple[str, ...]
-    air_density: float
     drag_coefficient: float
     area_scale: float
     wake_speed_scale: float
@@ -114,7 +119,6 @@ class DownwashParams:
             return cls(
                 enabled=False,
                 exclude_body_patterns=(),
-                air_density=1.225,
                 drag_coefficient=0.0,
                 area_scale=1.0,
                 wake_speed_scale=1.0,
@@ -139,9 +143,6 @@ class DownwashParams:
                 raise ValueError(f"{key} must be a finite number")
             return value_float
 
-        air_density = parse_float("air_density", 1.225)
-        if air_density <= 0.0:
-            raise ValueError("air_density must be > 0.0")
         drag_coefficient = parse_float("drag_coefficient", 1.1)
         if drag_coefficient < 0.0:
             raise ValueError("drag_coefficient must be >= 0.0")
@@ -160,7 +161,6 @@ class DownwashParams:
         return cls(
             enabled=bool(config.get("enabled", False)),
             exclude_body_patterns=exclude_body_patterns,
-            air_density=air_density,
             drag_coefficient=drag_coefficient,
             area_scale=area_scale,
             wake_speed_scale=wake_speed_scale,
@@ -170,11 +170,60 @@ class DownwashParams:
 
 
 @dataclass(frozen=True)
-class DownwashProjectionHull:
-    """Body-local convex hull face data for fast projected-area queries."""
+class RotorInertialTorqueParams:
+    """Optional analytical rotor acceleration and gyroscopic torque terms."""
 
-    face_normals_b: np.ndarray
-    face_areas: np.ndarray
+    enabled: bool
+    inertia_kg_m2: float
+    apply_acceleration_torque: bool
+    apply_gyro_torque: bool
+    randomize_enabled: bool
+    enabled_probability: float
+
+    @classmethod
+    def from_config(cls, config: dict[str, object] | None) -> "RotorInertialTorqueParams":
+        if not config:
+            return cls(
+                enabled=False,
+                inertia_kg_m2=0.0,
+                apply_acceleration_torque=True,
+                apply_gyro_torque=True,
+                randomize_enabled=False,
+                enabled_probability=1.0,
+            )
+
+        def parse_float(key: str, default: float) -> float:
+            value = config.get(key, default)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{key} must be a finite number")
+            value_float = float(value)
+            if not np.isfinite(value_float):
+                raise ValueError(f"{key} must be a finite number")
+            return value_float
+
+        inertia_kg_m2 = parse_float("inertia_kg_m2", 0.0)
+        if inertia_kg_m2 < 0.0:
+            raise ValueError("inertia_kg_m2 must be >= 0.0")
+        enabled_probability = parse_float("enabled_probability", 1.0)
+        if enabled_probability < 0.0 or enabled_probability > 1.0:
+            raise ValueError("enabled_probability must be in [0.0, 1.0]")
+        return cls(
+            enabled=bool(config.get("enabled", False)),
+            inertia_kg_m2=inertia_kg_m2,
+            apply_acceleration_torque=bool(config.get("apply_acceleration_torque", True)),
+            apply_gyro_torque=bool(config.get("apply_gyro_torque", True)),
+            randomize_enabled=bool(config.get("randomize_enabled", False)),
+            enabled_probability=enabled_probability,
+        )
+
+
+@dataclass(frozen=True)
+class AeroSurfaceSamples:
+    """Body-local surface samples used for distributed aerodynamic wrenches."""
+
+    points_b: np.ndarray
+    normals_b: np.ndarray
+    areas: np.ndarray
 
 
 def first_order_response_step(

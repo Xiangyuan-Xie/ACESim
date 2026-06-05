@@ -392,6 +392,9 @@ class PX4MJEnv(MJEnv):
     def _get_wind_velocity_w(self) -> np.ndarray:
         return self._mj_model.opt.wind.copy()
 
+    def _get_medium_density_kg_m3(self) -> float:
+        return float(self._mj_model.opt.density)
+
     def _compute_lumped_drag_force_w(
         self,
         rb: Rotation | np.ndarray,

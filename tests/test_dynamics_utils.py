@@ -8,6 +8,7 @@ from acesim.utils.dynamics import (
     DownwashParams,
     LumpedDragParams,
     RotorFlowParams,
+    RotorInertialTorqueParams,
     first_order_response_step,
     idle_visual_speed_target,
 )
@@ -47,6 +48,7 @@ class DynamicsUtilsTests(unittest.TestCase):
         self.assertEqual(params.advance_c_mu, 0.0)
         self.assertEqual(params.advance_scale_min, 1.0)
         self.assertFalse(params.ground_effect_enabled)
+        self.assertAlmostEqual(params.ground_effect_normal_min_dot, 0.5)
 
     def test_rotor_flow_params_parse_configured_defaults(self) -> None:
         params = RotorFlowParams.from_config(
@@ -59,6 +61,7 @@ class DynamicsUtilsTests(unittest.TestCase):
                 "ground_effect_enabled": True,
                 "ground_effect_max_scale": 1.25,
                 "ground_effect_height_rotor_diameters": 1.0,
+                "ground_effect_normal_min_dot": 0.6,
             }
         )
 
@@ -67,6 +70,7 @@ class DynamicsUtilsTests(unittest.TestCase):
         self.assertAlmostEqual(params.advance_scale_min, 0.85)
         self.assertTrue(params.ground_effect_enabled)
         self.assertAlmostEqual(params.ground_effect_max_scale, 1.25)
+        self.assertAlmostEqual(params.ground_effect_normal_min_dot, 0.6)
 
     def test_rotor_flow_params_reject_invalid_bounds(self) -> None:
         invalid_configs: list[dict[str, object]] = [
@@ -75,6 +79,7 @@ class DynamicsUtilsTests(unittest.TestCase):
             {"advance_scale_min": 1.2, "advance_scale_max": 1.1},
             {"ground_effect_max_scale": 0.9},
             {"ground_effect_height_rotor_diameters": -0.1},
+            {"ground_effect_normal_min_dot": 1.1},
         ]
 
         for config in invalid_configs:
@@ -95,7 +100,6 @@ class DynamicsUtilsTests(unittest.TestCase):
             {
                 "enabled": True,
                 "exclude_body_patterns": ["base_link", "rotor_*"],
-                "air_density": 1.225,
                 "drag_coefficient": 1.1,
                 "area_scale": 1.0,
                 "wake_speed_scale": 1.0,
@@ -106,7 +110,6 @@ class DynamicsUtilsTests(unittest.TestCase):
 
         self.assertTrue(params.enabled)
         self.assertEqual(params.exclude_body_patterns, ("base_link", "rotor_*"))
-        self.assertAlmostEqual(params.air_density, 1.225)
         self.assertAlmostEqual(params.drag_coefficient, 1.1)
         self.assertAlmostEqual(params.area_scale, 1.0)
         self.assertAlmostEqual(params.wake_speed_scale, 1.0)
@@ -117,8 +120,6 @@ class DynamicsUtilsTests(unittest.TestCase):
 
     def test_downwash_params_reject_nonphysical_coefficients(self) -> None:
         invalid_configs: list[dict[str, object]] = [
-            {"air_density": 0.0},
-            {"air_density": float("nan")},
             {"drag_coefficient": -0.1},
             {"area_scale": -0.1},
             {"wake_speed_scale": -0.1},
@@ -130,6 +131,48 @@ class DynamicsUtilsTests(unittest.TestCase):
             with self.subTest(config=config):
                 with self.assertRaises(ValueError):
                     DownwashParams.from_config(config)
+
+    def test_rotor_inertial_torque_params_default_to_disabled(self) -> None:
+        params = RotorInertialTorqueParams.from_config(None)
+
+        self.assertFalse(params.enabled)
+        self.assertEqual(params.inertia_kg_m2, 0.0)
+        self.assertTrue(params.apply_acceleration_torque)
+        self.assertTrue(params.apply_gyro_torque)
+        self.assertFalse(params.randomize_enabled)
+        self.assertEqual(params.enabled_probability, 1.0)
+
+    def test_rotor_inertial_torque_params_parse_configured_values(self) -> None:
+        params = RotorInertialTorqueParams.from_config(
+            {
+                "enabled": True,
+                "inertia_kg_m2": 1.5e-5,
+                "apply_acceleration_torque": False,
+                "apply_gyro_torque": True,
+                "randomize_enabled": True,
+                "enabled_probability": 0.25,
+            }
+        )
+
+        self.assertTrue(params.enabled)
+        self.assertAlmostEqual(params.inertia_kg_m2, 1.5e-5)
+        self.assertFalse(params.apply_acceleration_torque)
+        self.assertTrue(params.apply_gyro_torque)
+        self.assertTrue(params.randomize_enabled)
+        self.assertAlmostEqual(params.enabled_probability, 0.25)
+
+    def test_rotor_inertial_torque_params_reject_invalid_values(self) -> None:
+        invalid_configs: list[dict[str, object]] = [
+            {"inertia_kg_m2": -1.0},
+            {"inertia_kg_m2": float("inf")},
+            {"enabled_probability": -0.1},
+            {"enabled_probability": 1.1},
+        ]
+
+        for config in invalid_configs:
+            with self.subTest(config=config):
+                with self.assertRaises(ValueError):
+                    RotorInertialTorqueParams.from_config(config)
 
     def test_first_order_response_step_uses_up_time_constant_for_spin_up(self) -> None:
         updated = first_order_response_step(

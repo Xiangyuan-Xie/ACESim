@@ -5,6 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 compatibility
+    import tomli as tomllib
+
 from acesim.config.config_loader import ConfigLoader
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,3 +49,10 @@ class ConfigLoaderTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Env type 'mc_arm' not supported"):
             loader.get_sim_info()
+
+    def test_mujoco_air_density_is_not_configured_in_x500_arm_downwash_toml(self) -> None:
+        config = tomllib.loads((ROOT / "acesim" / "config" / "mujoco" / "x500_arm2x.toml").read_text())
+
+        params = config["params"]
+        self.assertNotIn("air_density", params["downwash"])
+        self.assertNotIn("body_aero_drag", params)

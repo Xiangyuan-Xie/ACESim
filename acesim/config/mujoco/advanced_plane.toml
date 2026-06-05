@@ -70,7 +70,6 @@ area = 0.8704
 aspect_ratio = 6.5
 efficiency = 0.97
 mac = 0.352
-air_density = 1.2041
 ref_pt = [-0.192, 0.0, 0.0]
 sigmoid_m = 15.0
 cd_fp_k1 = -3.0

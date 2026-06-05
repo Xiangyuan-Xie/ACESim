@@ -63,7 +63,6 @@ class AdvancedAeroParams:
     aspect_ratio: float
     efficiency: float
     mac: float
-    air_density: float
     ref_pt: np.ndarray
     sigmoid_m: float
     cd_fp_k1: float
@@ -86,7 +85,6 @@ class LiftSurfaceParams:
     cma_stall: float
     control_joint_rad_to_cl: float
     cm_delta: float = 0.0
-    air_density: float = 1.2041
 
 
 @dataclass
@@ -103,7 +101,6 @@ class FWParams:
     linear_damping: float
     angular_damping: float
     model: str = "advanced_plane"
-    air_density_sea_level: float = 1.225
     idle_visual_speed: float = 120.0
     low_speed_blend_end: float = 180.0
     visual_speed_smoothing_tc: float = 0.02
@@ -196,7 +193,6 @@ class FWEnv(PX4MJEnv):
             aspect_ratio=float(value.get("aspect_ratio", 6.5)),
             efficiency=float(value.get("efficiency", 0.97)),
             mac=float(value.get("mac", 0.22)),
-            air_density=float(value.get("air_density", 1.2041)),
             ref_pt=np.asarray(value.get("ref_pt", [0.0, 0.0, 0.0]), dtype=float),
             sigmoid_m=float(value.get("sigmoid_m", 15.0)),
             cd_fp_k1=float(value.get("cd_fp_k1", -3.0)),
@@ -222,7 +218,6 @@ class FWEnv(PX4MJEnv):
                 cma_stall=float(item.get("cma_stall", 0.0)),
                 control_joint_rad_to_cl=float(item.get("control_joint_rad_to_cl", 0.0)),
                 cm_delta=float(item.get("cm_delta", 0.0)),
-                air_density=float(item.get("air_density", 1.2041)),
             )
             for item in values
         ]
@@ -304,7 +299,7 @@ class FWEnv(PX4MJEnv):
         self._joint_target_map = {name: i for i, name in enumerate(self._surface_joint_names)}
         self._last_true_airspeed_mps = 0.0
         self._last_diff_pressure_hpa = 0.0
-        self._last_air_density = self._params.air_density_sea_level
+        self._last_air_density = self._get_medium_density_kg_m3()
 
     def _required_surface_joint_names(self) -> list[str]:
         return self._surface_joint_names
@@ -367,7 +362,7 @@ class FWEnv(PX4MJEnv):
 
     def _compute_apparent_body_velocity(self) -> tuple[np.ndarray, float]:
         _, _, _, rb_inv, v_com_w, _, _ = self._get_base_kinematics()
-        v_body = rb_inv.apply(v_com_w)
+        v_body = rb_inv.apply(v_com_w - self._get_wind_velocity_w())
         altitude_m = float(self._px4_sensor_params.gps_alt_start + self._get_sensor_raw("pos")[2])
         return v_body, altitude_m
 
@@ -396,13 +391,15 @@ class FWEnv(PX4MJEnv):
     def _compute_advanced_aero_wrench(self) -> tuple[np.ndarray, np.ndarray]:
         assert self._advanced_params is not None
         _, _, rb, rb_inv, v_com_w, gyro_flu, _ = self._get_base_kinematics()
-        body_velocity_flu = rb_inv.apply(v_com_w)
-        self._update_airspeed_state(self._advanced_params.air_density, body_velocity_flu)
+        air_velocity_w = v_com_w - self._get_wind_velocity_w()
+        body_velocity_flu = rb_inv.apply(air_velocity_w)
+        air_density = self._get_medium_density_kg_m3()
+        self._update_airspeed_state(air_density, body_velocity_flu)
 
         # Keep the advanced fixed-wing model expressed in world/stability axes so
         # the fitted coefficients continue to match PX4's SIH-style semantics.
         body_x, body_y_right, body_z_down = self._body_axes_world(rb)
-        air_velocity = v_com_w
+        air_velocity = air_velocity_w
         vel_in_ld_plane = air_velocity - np.dot(air_velocity, body_y_right) * body_y_right
         speed_in_ld_plane = float(np.linalg.norm(vel_in_ld_plane))
         if speed_in_ld_plane <= 1e-6:
@@ -418,8 +415,8 @@ class FWEnv(PX4MJEnv):
         stabx_proj_bodyz = float(np.dot(stability_x, body_z_down))
         alpha = float(np.arctan2(stabx_proj_bodyz, stabx_proj_bodyx))
         beta = float(np.arctan2(np.dot(air_velocity, body_y_right), np.dot(air_velocity, body_x)))
-        dyn_pres = 0.5 * self._advanced_params.air_density * speed_in_ld_plane * speed_in_ld_plane
-        half_rho_vel = 0.5 * self._advanced_params.air_density * speed_in_ld_plane
+        dyn_pres = 0.5 * air_density * speed_in_ld_plane * speed_in_ld_plane
+        half_rho_vel = 0.5 * air_density * speed_in_ld_plane
         span = float(np.sqrt(self._advanced_params.area * self._advanced_params.aspect_ratio))
         mac = self._advanced_params.mac if self._advanced_params.mac > 0.0 else self._advanced_params.area / span
 
@@ -535,8 +532,10 @@ class FWEnv(PX4MJEnv):
 
     def _compute_lift_drag_aero_wrench(self) -> tuple[np.ndarray, np.ndarray]:
         _, _, rb, rb_inv, v_com_w, _, omega_w = self._get_base_kinematics()
-        body_velocity_flu = rb_inv.apply(v_com_w)
-        self._update_airspeed_state(self._params.air_density_sea_level, body_velocity_flu)
+        wind_w = self._get_wind_velocity_w()
+        body_velocity_flu = rb_inv.apply(v_com_w - wind_w)
+        air_density = self._get_medium_density_kg_m3()
+        self._update_airspeed_state(air_density, body_velocity_flu)
 
         forward_world = rb.apply(np.array([1.0, 0.0, 0.0], dtype=float))
         upward_world = rb.apply(np.array([0.0, 0.0, 1.0], dtype=float))
@@ -545,7 +544,7 @@ class FWEnv(PX4MJEnv):
 
         for surface in self._lift_surface_params:
             cp_world = rb.apply(surface.cp)
-            vel_world = v_com_w + np.cross(omega_w, cp_world)
+            vel_world = v_com_w + np.cross(omega_w, cp_world) - wind_w
             speed = float(np.linalg.norm(vel_world))
             if speed <= 0.01:
                 continue
@@ -579,7 +578,7 @@ class FWEnv(PX4MJEnv):
             while abs(alpha) > 0.5 * np.pi:
                 alpha = alpha - np.pi if alpha > 0.0 else alpha + np.pi
 
-            dyn_pres = 0.5 * surface.air_density * speed_in_ld_plane * speed_in_ld_plane
+            dyn_pres = 0.5 * air_density * speed_in_ld_plane * speed_in_ld_plane
             if alpha > surface.alpha_stall:
                 cl = (surface.cla * surface.alpha_stall + surface.cla_stall * (alpha - surface.alpha_stall)) * cos_sweep
                 cl = max(0.0, cl)

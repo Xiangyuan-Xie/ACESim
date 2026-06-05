@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <mujoco model="standard_vtol">
   <compiler angle="radian" meshdir="meshes/" texturedir="meshes/" />
-  <option density="1.225" timestep="0.001" integrator="implicit" viscosity="1.8e-5" cone="elliptic" impratio="10" magnetic="2.73e-5 0 -4.54e-5" />
+  <option density="1.2041" timestep="0.001" integrator="implicit" viscosity="1.8e-5" cone="elliptic" impratio="10" magnetic="2.73e-5 0 -4.54e-5" />
   <size njmax="500" nconmax="100" />
   <asset>
     <mesh name="base_link_visual_0" file="base_link_visual_0.stl" scale="0.001 0.001 0.001" />

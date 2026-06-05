@@ -23,6 +23,7 @@ advance_scale_max = 1.10
 ground_effect_enabled = true
 ground_effect_max_scale = 1.25
 ground_effect_height_rotor_diameters = 1.0
+ground_effect_normal_min_dot = 0.5
 
 [params.px4_fusion]
 mode = "mocap"
