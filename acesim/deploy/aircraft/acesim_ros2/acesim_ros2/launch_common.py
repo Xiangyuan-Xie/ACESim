@@ -215,7 +215,8 @@ def build_launch_entities(
     play_executable: Optional[str] = "acesim_play",
     additional_play_env: Optional[dict[str, str]] = None,
     enable_px4_post_start_setup: bool = True,
-    play_start_delay_sec: float = 2.0,
+    play_start_delay_sec: float = 0.0,
+    px4_post_start_readiness_mode: Literal["background", "wait", "off"] = "background",
 ):
     px4_additional_env = build_px4_additional_env()
     config_file = bridge_config_path()
@@ -273,7 +274,10 @@ def build_launch_entities(
     acesim_play = build_play_action(play_executable, additional_play_env) if play_executable else None
     px4_post_start_setup = None
     if enable_px4_post_start_setup:
-        post_start_env = {"ACESIM_PX4_VERIFY_ARMABLE": os.environ.get("ACESIM_PX4_VERIFY_ARMABLE", "1")}
+        post_start_env = {
+            "ACESIM_PX4_READINESS_MODE": px4_post_start_readiness_mode,
+            "ACESIM_PX4_VERIFY_ARMABLE": os.environ.get("ACESIM_PX4_VERIFY_ARMABLE", "1"),
+        }
         px4_post_start_setup = build_px4_post_start_setup_process(post_start_env)
         entities.append(px4_post_start_setup)
 

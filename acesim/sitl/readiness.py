@@ -28,6 +28,7 @@ READINESS_MESSAGE_TYPES = [
     "SYS_STATUS",
     "STATUSTEXT",
 ]
+READINESS_MODE_ENV = "ACESIM_PX4_READINESS_MODE"
 MAV_CMD_SET_MESSAGE_INTERVAL = getattr(mavutil.mavlink, "MAV_CMD_SET_MESSAGE_INTERVAL", 511)
 MAV_CMD_RUN_PREARM_CHECKS = getattr(mavutil.mavlink, "MAV_CMD_RUN_PREARM_CHECKS", 401)
 MAV_CMD_COMPONENT_ARM_DISARM = getattr(mavutil.mavlink, "MAV_CMD_COMPONENT_ARM_DISARM", 400)
@@ -820,6 +821,9 @@ def run_post_start_setup(argv: list[str]) -> None:
     gps_home_lat = float(argv[1])
     gps_home_lon = float(argv[2])
     gps_alt_start = float(argv[3])
+    readiness_mode = os.environ.get(READINESS_MODE_ENV, "wait").strip().lower()
+    if readiness_mode not in {"background", "wait", "off"}:
+        raise RuntimeError(f"{READINESS_MODE_ENV} must be one of: background, wait, off")
 
     mav = mavutil.mavlink_connection(
         _px4_mavlink_url(),
@@ -828,7 +832,13 @@ def run_post_start_setup(argv: list[str]) -> None:
         autoreconnect=True,
     )
     wait_for_mavlink(mav)
-    wait_for_px4_ready(mav, fusion_mode, gps_home_lat, gps_home_lon, gps_alt_start)
+    if readiness_mode == "wait":
+        wait_for_px4_ready(mav, fusion_mode, gps_home_lat, gps_home_lon, gps_alt_start)
+        return
+
+    run_required_px4_setup(mav, fusion_mode, gps_home_lat, gps_home_lon, gps_alt_start)
+    if readiness_mode == "background":
+        run_background_readiness_diagnostics(mav, fusion_mode, gps_home_lat, gps_home_lon, gps_alt_start)
 
 
 def _request_shutdown(_signum: int, _frame: object) -> None:

@@ -565,6 +565,39 @@ class PX4PostStartSetupTests(unittest.TestCase):
             ],
         )
 
+    def test_mocap_post_start_background_mode_does_not_block_on_armability(self) -> None:
+        calls: list[str] = []
+        mav = _FakeMavConnection([])
+
+        with patch.object(self.module.mavutil, "mavlink_connection", return_value=mav):
+            with patch.object(self.module, "wait_for_mavlink", side_effect=lambda _mav: calls.append("wait_mavlink")):
+                with patch.object(
+                    self.module,
+                    "send_ekf_origin",
+                    side_effect=lambda _mav, _lat, _lon, _alt: calls.append("send_origin"),
+                ):
+                    with patch.object(
+                        self.module,
+                        "wait_for_estimator_ready_quietly",
+                        side_effect=lambda _mav, _lat, _lon: calls.append("background_ready"),
+                    ):
+                        with patch.object(
+                            self.module,
+                            "verify_armable",
+                            side_effect=AssertionError("background mode must not arm/disarm"),
+                        ):
+                            with patch.dict(os.environ, {"ACESIM_PX4_READINESS_MODE": "background"}, clear=True):
+                                self.module.run_post_start_setup(["mocap", "39.98329", "116.34745", "50.0"])
+
+        self.assertEqual(
+            calls,
+            [
+                "wait_mavlink",
+                "send_origin",
+                "background_ready",
+            ],
+        )
+
     def test_mocap_post_start_retries_readiness_when_armability_rejects(self) -> None:
         calls: list[str] = []
         mav = _FakeMavConnection([])

@@ -699,7 +699,7 @@ bridges:
         self.assertIs(exit_handler.event_handler.target_action, play_node)
         self.assertEqual(exit_handler.event_handler.on_exit[0].event.reason, "ACESim frontend exited")
 
-    def test_build_launch_entities_starts_frontend_after_post_start_setup(self) -> None:
+    def test_build_launch_entities_starts_frontend_with_background_post_start_setup(self) -> None:
         with patch.object(
             self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
         ):
@@ -720,9 +720,10 @@ bridges:
 
         self.assertIn("acesim_ros2.px4_post_start_setup", post_start_process.cmd)
         self.assertEqual(post_start_process.output, "both")
+        self.assertEqual(post_start_process.additional_env["ACESIM_PX4_READINESS_MODE"], "background")
         self.assertEqual(post_start_process.additional_env["ACESIM_PX4_VERIFY_ARMABLE"], "1")
         self.assertEqual(play_node.executable, "acesim_play")
-        self.assertEqual(timer.period, 2.0)
+        self.assertEqual(timer.period, 0.0)
 
     def test_build_launch_entities_does_not_add_frontend_shutdown_without_play_node(self) -> None:
         with patch.object(
@@ -770,7 +771,7 @@ bridges:
         self.assertEqual(process.additional_env["PYTHONUNBUFFERED"], "1")
         self.assertNotIn("ACESIM_PX4_VERIFY_ARMABLE", process.additional_env)
 
-    def test_build_launch_entities_enables_default_post_start_armability_verification(self) -> None:
+    def test_build_launch_entities_uses_background_post_start_readiness_by_default(self) -> None:
         with patch.object(
             self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
         ):
@@ -781,7 +782,24 @@ bridges:
             entity for entity in entities if "acesim_ros2.px4_post_start_setup" in " ".join(getattr(entity, "cmd", []))
         )
 
+        self.assertEqual(post_start_process.additional_env["ACESIM_PX4_READINESS_MODE"], "background")
         self.assertEqual(post_start_process.additional_env["ACESIM_PX4_VERIFY_ARMABLE"], "1")
+
+    def test_build_launch_entities_can_request_strict_post_start_readiness(self) -> None:
+        with patch.object(
+            self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("advanced_plane", env_type="fw")
+        ):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities(
+                    "/tmp/px4",
+                    px4_post_start_readiness_mode="wait",
+                )
+
+        post_start_process = next(
+            entity for entity in entities if "acesim_ros2.px4_post_start_setup" in " ".join(getattr(entity, "cmd", []))
+        )
+
+        self.assertEqual(post_start_process.additional_env["ACESIM_PX4_READINESS_MODE"], "wait")
 
     def test_build_launch_entities_preserves_post_start_armability_opt_out(self) -> None:
         with patch.dict(os.environ, {"ACESIM_PX4_VERIFY_ARMABLE": "0"}):
