@@ -60,6 +60,14 @@ class PX4MJEnv(MJEnv):
 
         self._base_link_id = mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_BODY, "base_link")
         assert self._base_link_id >= 0, "MuJoCo model must define body 'base_link'"
+        subtree_body_ids: list[int] = []
+        for body_id in range(self._mj_model.nbody):
+            current_id = int(body_id)
+            while current_id > 0 and current_id != self._base_link_id:
+                current_id = int(self._mj_model.body_parentid[current_id])
+            if current_id == self._base_link_id:
+                subtree_body_ids.append(body_id)
+        self._base_link_subtree_mass_kg = float(np.sum(self._mj_model.body_mass[subtree_body_ids]))
         self._sensor_id_map = {
             "pos": mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "framepos"),
             "quat": mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "framequat"),
@@ -404,7 +412,7 @@ class PX4MJEnv(MJEnv):
         params = getattr(self, "_lumped_drag_params", None)
         if params is None or not params.enabled:
             return np.zeros(3, dtype=float)
-        mass = float(np.sum(self._mj_model.body_mass))
+        mass = self._base_link_subtree_mass_kg
         v_air_com_w = np.asarray(v_com_w, dtype=float) - self._get_wind_velocity_w()
         v_air_com_b = rb_inv @ v_air_com_w if isinstance(rb_inv, np.ndarray) else rb_inv.apply(v_air_com_w)
         force_b = -mass * params.d * v_air_com_b

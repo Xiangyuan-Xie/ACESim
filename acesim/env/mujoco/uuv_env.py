@@ -152,19 +152,20 @@ class UUVEnv(PX4MJEnv):
         rb: Rotation,
         body_velocity_flu: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        rotor_positions_w = np.zeros((self._rotor_count, 3), dtype=float)
-        rotor_force_w = np.zeros_like(rotor_positions_w)
-        rotor_moment_w = np.zeros_like(rotor_positions_w)
-        for i in range(self._rotor_count):
-            omega = self._rotor_angular_velocity[i]
-            force_scalar = omega * abs(omega) * self._params.motor_constant[i]
-            axis_b = self._rotor_axes_b[i]
-            force_b = axis_b * force_scalar
-            torque_b = -self._params.rotor_direction[i] * force_scalar * self._params.moment_constant[i] * axis_b
-            rotor_positions_w[i] = base_pos + rb.apply(self._rotor_offsets[i])
-            rotor_force_w[i] = rb.apply(force_b)
-            rotor_moment_w[i] = rb.apply(torque_b)
-        return rotor_positions_w, rotor_force_w, rotor_moment_w
+        rb_mat = rb.as_matrix()
+        force_scalar = self._rotor_angular_velocity * np.abs(self._rotor_angular_velocity) * self._params.motor_constant
+        force_b = self._rotor_axes_b * force_scalar[:, None]
+        torque_b = (
+            -self._params.rotor_direction[:, None]
+            * force_scalar[:, None]
+            * self._params.moment_constant[:, None]
+            * self._rotor_axes_b
+        )
+        return (
+            base_pos + self._rotor_offsets @ rb_mat.T,
+            force_b @ rb_mat.T,
+            torque_b @ rb_mat.T,
+        )
 
     def _apply_vehicle_physics(self) -> None:
         self._clear_applied_wrenches()

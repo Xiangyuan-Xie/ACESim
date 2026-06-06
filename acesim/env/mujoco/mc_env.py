@@ -301,15 +301,6 @@ class MCEnv(PX4MJEnv):
 
         return rotor_positions_w, rotor_axes_w, rotor_thrusts, rotor_force_w, rotor_moment_w
 
-    def _apply_rotor_wrenches(
-        self,
-        rotor_positions_w: np.ndarray,
-        rotor_force_w: np.ndarray,
-        rotor_moment_w: np.ndarray,
-    ) -> None:
-        self._clear_applied_wrenches()
-        self._apply_world_wrenches(rotor_positions_w, rotor_force_w, rotor_moment_w)
-
     def _select_aero_geom_ids(self, body_id: int) -> list[int]:
         body_geom_ids = [
             geom_id for geom_id in range(self._mj_model.ngeom) if int(self._mj_model.geom_bodyid[geom_id]) == body_id
@@ -756,7 +747,8 @@ class MCEnv(PX4MJEnv):
                 rotor_axis_w=rotor_axis_w,
                 omega_w=omega_w,
             )
-        self._apply_rotor_wrenches(rotor_positions_w, rotor_force_w, rotor_moment_w)
+        self._clear_applied_wrenches()
+        self._apply_world_wrenches(rotor_positions_w, rotor_force_w, rotor_moment_w)
         self._apply_downwash_forces(rotor_positions_w, rotor_thrusts, rotor_axes_w=rotor_axes_w)
         self._apply_lumped_drag_wrench(base_pos, rb_mat, rb_inv_mat, v_com_w)
 

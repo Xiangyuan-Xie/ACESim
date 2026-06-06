@@ -146,7 +146,7 @@ def _config_path(name: str) -> Path:
     return (Path(__file__).resolve().parents[1] / "acesim" / "config" / f"{name}.toml").resolve()
 
 
-def _write_mujoco_config(root: Path, *, env_type: str, asset_name: str) -> Path:
+def _write_mujoco_config(root: Path, *, env_type: str, asset_name: str, scene_name: str = "default") -> Path:
     config_path = root / "config.toml"
     asset_dir = root / "mujoco"
     asset_dir.mkdir(parents=True, exist_ok=True)
@@ -158,7 +158,7 @@ def _write_mujoco_config(root: Path, *, env_type: str, asset_name: str) -> Path:
                 "[basic]",
                 'sim_type = "mujoco"',
                 f'env_type = "{env_type}"',
-                'scene_name = "default"',
+                f'scene_name = "{scene_name}"',
                 f'asset_name = "{asset_name}"',
                 'benchmark = "multirotor"',
                 "",
@@ -483,7 +483,8 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
     def test_multicopter_lumped_drag_uses_body_frame_mass_normalized_coefficients(self) -> None:
         env = MCEnv(ConfigLoader(_config_path("default")))
         try:
-            mass = float(np.sum(env._mj_model.body_mass))
+            mass = env._base_link_subtree_mass_kg
+            self.assertGreater(mass, float(env._mj_model.body_mass[env._base_link_id]))
             rb = Rotation.from_euler("z", 90.0, degrees=True)
             rb_inv = rb.inv()
             velocity_w = rb.apply(np.array([2.0, -3.0, 4.0], dtype=float))
@@ -499,6 +500,35 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
                 atol=1e-12,
             )
+        finally:
+            env.close()
+
+    def test_multicopter_lumped_drag_ignores_external_dynamic_scene_mass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = _write_mujoco_config(
+                Path(tmp_dir),
+                env_type="am",
+                asset_name="x500_arm2x",
+                scene_name="table_with_water_bottle",
+            )
+            env = MCEnv(ConfigLoader(config_path))
+        try:
+            vehicle_mass = env._base_link_subtree_mass_kg
+            total_mass = float(np.sum(env._mj_model.body_mass))
+            self.assertGreater(total_mass, vehicle_mass + 10.0)
+            self.assertGreater(vehicle_mass, float(env._mj_model.body_mass[env._base_link_id]))
+
+            rb = Rotation.identity()
+            velocity_w = np.array([2.0, -3.0, 0.5], dtype=float)
+            env._mj_model.opt.wind[:] = np.array([0.5, 1.0, 0.5], dtype=float)
+            force_w = env._compute_lumped_drag_force_w(rb, rb.inv(), velocity_w)
+
+            expected_velocity_b = np.array([1.5, -4.0, 0.0], dtype=float)
+            drag_coeff = np.array([0.20, 0.20, 0.00], dtype=float)
+            expected_force_w = -vehicle_mass * drag_coeff * expected_velocity_b
+            old_all_model_force_w = -total_mass * drag_coeff * expected_velocity_b
+            np.testing.assert_allclose(force_w, expected_force_w, atol=1e-12)
+            self.assertGreater(float(np.linalg.norm(force_w - old_all_model_force_w)), 1.0)
         finally:
             env.close()
 
@@ -1296,7 +1326,8 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 )
 
                 with patch("acesim.env.mujoco.mc_env.mujoco.mj_applyFT") as apply_ft:
-                    env._apply_rotor_wrenches(rotor_positions_w, rotor_force_w, rotor_moment_w)
+                    env._clear_applied_wrenches()
+                    env._apply_world_wrenches(rotor_positions_w, rotor_force_w, rotor_moment_w)
                     env._apply_downwash_forces(rotor_positions_w, rotor_thrusts, rotor_axes_w=rotor_axes_w)
 
                 downwash_calls = [
@@ -1680,6 +1711,23 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             )
             self.assertEqual(rotor_positions_w.shape[0], 8)
             self.assertLess(np.dot(rotor_force_w[0], env._rotor_axes_b[0]), 0.0)
+            expected_force_scalar = (
+                env._rotor_angular_velocity * np.abs(env._rotor_angular_velocity) * env._params.motor_constant
+            )
+            expected_force_w = env._rotor_axes_b * expected_force_scalar[:, None]
+            expected_moment_w = (
+                -env._params.rotor_direction[:, None]
+                * expected_force_scalar[:, None]
+                * env._params.moment_constant[:, None]
+                * env._rotor_axes_b
+            )
+            np.testing.assert_allclose(rotor_force_w, expected_force_w, atol=1e-12)
+            _, _, rotor_moment_w = env._compute_thruster_wrenches(
+                np.array([0.0, 0.0, 1.0], dtype=float),
+                Rotation.identity(),
+                np.zeros(3, dtype=float),
+            )
+            np.testing.assert_allclose(rotor_moment_w, expected_moment_w, atol=1e-12)
 
             hydro_force_b, hydro_torque_b = env._compute_hydrodynamic_wrench(
                 np.array([1.5, 0.0, 0.0], dtype=float),
