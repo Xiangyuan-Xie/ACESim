@@ -562,6 +562,61 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         finally:
             env.close()
 
+    def test_px4_mj_world_wrench_batches_are_combined_for_base_link(self) -> None:
+        env = MCEnv(ConfigLoader(_config_path("default")))
+        try:
+            positions_w = np.array(
+                [
+                    [0.0, 0.0, 1.0],
+                    [0.4, -0.2, 1.1],
+                    [-0.1, 0.3, 0.8],
+                ],
+                dtype=float,
+            )
+            forces_w = np.array(
+                [
+                    [1.0, 2.0, 3.0],
+                    [-1.0, 0.5, 0.25],
+                    [0.0, -2.5, 1.5],
+                ],
+                dtype=float,
+            )
+            moments_w = np.array(
+                [
+                    [0.2, 0.0, -0.1],
+                    [0.0, 0.5, 0.0],
+                    [-0.3, 0.1, 0.4],
+                ],
+                dtype=float,
+            )
+            expected_qfrc = np.zeros_like(env._mj_data.qfrc_applied)
+            for position_w, force_w, moment_w in zip(positions_w, forces_w, moments_w):
+                mujoco.mj_applyFT(
+                    env._mj_model,
+                    env._mj_data,
+                    force_w,
+                    moment_w,
+                    position_w,
+                    env._base_link_id,
+                    expected_qfrc,
+                )
+
+            env._mj_data.qfrc_applied[:] = 0.0
+            with patch("acesim.env.mujoco.px4_mj_env.mujoco.mj_applyFT", wraps=mujoco.mj_applyFT) as apply_ft:
+                env._apply_world_wrenches(positions_w, forces_w, moments_w)
+
+            apply_ft.assert_called_once()
+            _, _, force_arg, moment_arg, point_arg, body_id, _ = apply_ft.call_args.args
+            expected_force = np.sum(forces_w, axis=0)
+            expected_moment = np.sum(moments_w + np.cross(positions_w - positions_w[0], forces_w), axis=0)
+            np.testing.assert_allclose(force_arg, expected_force, atol=1e-12)
+            np.testing.assert_allclose(moment_arg, expected_moment, atol=1e-12)
+            np.testing.assert_allclose(point_arg, positions_w[0], atol=1e-12)
+            self.assertEqual(body_id, env._base_link_id)
+            np.testing.assert_allclose(env._mj_data.qfrc_applied, expected_qfrc, atol=1e-12)
+        finally:
+            env.close()
+
     def test_multicopter_lateral_rotor_drag_opposes_lateral_velocity_without_changing_thrust(self) -> None:
         env = MCEnv(ConfigLoader(_config_path("default")))
         try:
@@ -1560,6 +1615,29 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
 
             expected_axis_w = tilt.apply(np.array([0.0, 0.0, 1.0], dtype=float))
             np.testing.assert_allclose(rotor_axes_w[0], expected_axis_w, atol=1e-12)
+        finally:
+            env.close()
+
+    def test_standard_vtol_lift_rotor_wrenches_use_mujoco_xmat_hot_path(self) -> None:
+        env = VTOLEnv(ConfigLoader(_config_path("standard_vtol")))
+        try:
+            self._seed_kinematics(env, pos=np.array([0.0, 0.0, 0.9]), linvel=np.zeros(3))
+            env._handle_applied_actuator_controls(np.ones(9, dtype=float))
+            env._update_lift_rotor_speed_state(1.0)
+            base_pos, _, rb, rb_inv, v_com_w, _, omega_w = env._get_base_kinematics()
+            tilt = Rotation.from_euler("y", 25.0, degrees=True)
+            env._mj_data.xmat[env._lift_rotor_body_ids[0]] = tilt.as_matrix().reshape(9)
+
+            class _NoFromQuatRotation:
+                @staticmethod
+                def from_quat(*_args: object, **_kwargs: object) -> object:
+                    raise AssertionError("slow path")
+
+            with patch("acesim.env.mujoco.vtol_env.Rotation", _NoFromQuatRotation):
+                _, rotor_force_w, _ = env._compute_lift_rotor_wrenches(base_pos, rb, rb_inv, v_com_w, omega_w)
+
+            expected_axis_w = tilt.apply(np.array([0.0, 0.0, 1.0], dtype=float))
+            self.assertGreater(float(np.dot(rotor_force_w[0], expected_axis_w)), 0.0)
         finally:
             env.close()
 

@@ -386,16 +386,21 @@ class PX4MJEnv(MJEnv):
         ``acesim.utils``.
         """
 
-        for position_world, force_world, moment_world in zip(positions_world_m, forces_world_n, moments_world_nm):
-            mujoco.mj_applyFT(
-                self._mj_model,
-                self._mj_data,
-                np.asarray(force_world, dtype=float),
-                np.asarray(moment_world, dtype=float),
-                np.asarray(position_world, dtype=float),
-                self._base_link_id,
-                self._mj_data.qfrc_applied,
-            )
+        if len(positions_world_m) == 0:
+            return
+        positions = np.asarray(positions_world_m, dtype=float)
+        forces = np.asarray(forces_world_n, dtype=float)
+        moments = np.asarray(moments_world_nm, dtype=float)
+        ref_position = positions[0]
+        mujoco.mj_applyFT(
+            self._mj_model,
+            self._mj_data,
+            np.sum(forces, axis=0),
+            np.sum(moments + np.cross(positions - ref_position, forces), axis=0),
+            ref_position,
+            self._base_link_id,
+            self._mj_data.qfrc_applied,
+        )
 
     def _get_wind_velocity_w(self) -> np.ndarray:
         return self._mj_model.opt.wind.copy()

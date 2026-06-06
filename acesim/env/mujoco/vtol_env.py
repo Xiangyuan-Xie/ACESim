@@ -99,6 +99,9 @@ class VTOLEnv(FWEnv):
         self._lift_rotor_angular_velocity = np.zeros(rotor_count, dtype=float)
         self._visual_lift_rotor_angular_velocity = np.zeros(rotor_count, dtype=float)
         self._lift_rotor_angle = np.zeros(rotor_count, dtype=float)
+        self._lift_rotor_positions_w = np.zeros((rotor_count, 3), dtype=float)
+        self._lift_rotor_force_w = np.zeros((rotor_count, 3), dtype=float)
+        self._lift_rotor_moment_w = np.zeros((rotor_count, 3), dtype=float)
         self._tilt_joint_ids = [
             mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
             for joint_name in self._tilt_joint_names
@@ -147,24 +150,26 @@ class VTOLEnv(FWEnv):
         v_com_w: np.ndarray,
         omega_w: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        rotor_positions_w = np.zeros((len(self._lift_rotor_indices), 3), dtype=float)
-        rotor_force_w = np.zeros_like(rotor_positions_w)
-        rotor_moment_w = np.zeros_like(rotor_positions_w)
+        rotor_positions_w = self._lift_rotor_positions_w
+        rotor_force_w = self._lift_rotor_force_w
+        rotor_moment_w = self._lift_rotor_moment_w
+        rotor_force_w[:] = 0.0
+        rotor_moment_w[:] = 0.0
         wind_w = self._get_wind_velocity_w()
+        rb_mat = rb.as_matrix()
+        rb_inv_mat = rb_inv.as_matrix()
         for i, body_id in enumerate(self._lift_rotor_body_ids):
             rotor_positions_w[i] = (
-                self._mj_data.site_xpos[self._lift_rotor_site_ids[i]].copy()
+                self._mj_data.site_xpos[self._lift_rotor_site_ids[i]]
                 if self._lift_rotor_site_ids[i] >= 0
-                else self._mj_data.xpos[body_id].copy()
+                else self._mj_data.xpos[body_id]
             )
             r_off_w = rotor_positions_w[i] - base_pos
             v_point_w = v_com_w + np.cross(omega_w, r_off_w)
             v_air_point_w = v_point_w - wind_w
-            v_point_r = rb_inv.apply(v_air_point_w)
-            rotor_axis_w = Rotation.from_quat(self._mj_data.xquat[body_id].copy(), scalar_first=True).apply(
-                np.array([0.0, 0.0, 1.0], dtype=float)
-            )
-            rotor_axis_r = rb_inv.apply(rotor_axis_w)
+            v_point_r = rb_inv_mat @ v_air_point_w
+            rotor_axis_w = self._mj_data.xmat[body_id].reshape(3, 3)[:, 2]
+            rotor_axis_r = rb_inv_mat @ rotor_axis_w
             rotor_axis_r = rotor_axis_r / max(np.linalg.norm(rotor_axis_r), 1e-12)
             v_parallel_r = rotor_axis_r * float(np.dot(v_point_r, rotor_axis_r))
             v_perp_r = v_point_r - v_parallel_r
@@ -175,8 +180,8 @@ class VTOLEnv(FWEnv):
             torque_axis_r = -direction * thrust * self._lift_params.moment_constant * rotor_axis_r
             f_drag_r = -self._lift_params.rotor_drag_coeff * omega_abs * v_perp_r
             m_rolling_r = -self._lift_params.rolling_moment_coeff * omega_abs * direction * v_perp_r
-            rotor_force_w[i] = rb.apply(rotor_axis_r * thrust + f_drag_r)
-            rotor_moment_w[i] = rb.apply(torque_axis_r + m_rolling_r)
+            rotor_force_w[i] = rb_mat @ (rotor_axis_r * thrust + f_drag_r)
+            rotor_moment_w[i] = rb_mat @ (torque_axis_r + m_rolling_r)
         return rotor_positions_w, rotor_force_w, rotor_moment_w
 
     def _apply_vehicle_physics(self) -> None:
