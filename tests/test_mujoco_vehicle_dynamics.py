@@ -1574,16 +1574,26 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             self.assertGreater(prop_force_b[0], 0.0)
 
             env._handle_applied_actuator_controls(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0], dtype=float))
+            elevator_idx = env._joint_target_map["elevator_joint"]
+            elevator_joint_id = env._surface_joint_ids[elevator_idx]
+            env._mj_data.qpos[env._mj_model.jnt_qposadr[elevator_joint_id]] = env._surface_targets[elevator_idx]
             _, elevator_moment = env._compute_aero_wrench()
             self.assertGreater(abs(elevator_moment[1]), 1e-4)
 
             env._handle_applied_actuator_controls(
                 np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.35, -0.35, 0.0, 0.0], dtype=float)
             )
+            for joint_name in ("left_elevon_joint", "right_elevon_joint"):
+                idx = env._joint_target_map[joint_name]
+                joint_id = env._surface_joint_ids[idx]
+                env._mj_data.qpos[env._mj_model.jnt_qposadr[joint_id]] = env._surface_targets[idx]
             _, roll_moment = env._compute_aero_wrench()
             self.assertGreater(abs(roll_moment[0]), 1e-4)
 
             env._handle_applied_actuator_controls(np.array([0.0, 0.0, 0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float))
+            rudder_idx = env._joint_target_map["rudder_joint"]
+            rudder_joint_id = env._surface_joint_ids[rudder_idx]
+            env._mj_data.qpos[env._mj_model.jnt_qposadr[rudder_joint_id]] = env._surface_targets[rudder_idx]
             _, yaw_moment = env._compute_aero_wrench()
             self.assertGreater(abs(yaw_moment[2]), 1e-4)
             self.assertGreater(env._read_diff_pressure_hpa() or 0.0, 0.0)
@@ -1595,6 +1605,39 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             np.testing.assert_allclose(aero_force_b, np.zeros(3, dtype=float), atol=1e-12)
             np.testing.assert_allclose(aero_moment_b, np.zeros(3, dtype=float), atol=1e-12)
             self.assertAlmostEqual(env._read_diff_pressure_hpa() or 0.0, 0.0)
+        finally:
+            env.close()
+
+    def test_fixed_wing_surface_targets_map_normalized_controls_to_actuator_range(self) -> None:
+        env = FWEnv(ConfigLoader(_config_path("advanced_plane")))
+        try:
+            controls = np.zeros(9, dtype=float)
+            controls[5] = 1.0
+            controls[7] = -0.5
+            env._handle_applied_actuator_controls(controls)
+            env._apply_surface_targets()
+
+            left_idx = env._joint_target_map["left_elevon_joint"]
+            elevator_idx = env._joint_target_map["elevator_joint"]
+            left_act_id = env._surface_actuator_ids[left_idx]
+            elevator_act_id = env._surface_actuator_ids[elevator_idx]
+            left_lower, left_upper = env._mj_model.actuator_ctrlrange[left_act_id]
+            elevator_lower, elevator_upper = env._mj_model.actuator_ctrlrange[elevator_act_id]
+            elevator_center = 0.5 * float(elevator_lower + elevator_upper)
+            elevator_half = 0.5 * float(elevator_upper - elevator_lower)
+
+            self.assertAlmostEqual(env._surface_targets[left_idx], float(left_upper))
+            self.assertAlmostEqual(env._mj_data.ctrl[left_act_id], float(left_upper))
+            self.assertAlmostEqual(env._surface_targets[elevator_idx], elevator_center + 0.5 * elevator_half)
+            self.assertAlmostEqual(env._mj_data.ctrl[elevator_act_id], elevator_center + 0.5 * elevator_half)
+
+            stale_target = float(env._surface_targets[left_idx])
+            actual_angle = -0.123
+            left_joint_id = env._surface_joint_ids[left_idx]
+            env._mj_data.qpos[env._mj_model.jnt_qposadr[left_joint_id]] = actual_angle
+            self.assertNotAlmostEqual(stale_target, actual_angle)
+            self.assertAlmostEqual(env._surface_angle("left_elevon_joint"), actual_angle)
+            self.assertEqual(env._surface_angle("missing_joint"), 0.0)
         finally:
             env.close()
 
@@ -1676,6 +1719,10 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             env._handle_applied_actuator_controls(
                 np.array([0.0, 0.0, 0.0, 0.0, 0.8, 0.3, -0.3, 0.35, 0.0], dtype=float)
             )
+            for joint_name in ("left_elevon_joint", "right_elevon_joint", "elevator_joint"):
+                idx = env._joint_target_map[joint_name]
+                joint_id = env._surface_joint_ids[idx]
+                env._mj_data.qpos[env._mj_model.jnt_qposadr[joint_id]] = env._surface_targets[idx]
             _, aero_moment = env._compute_aero_wrench()
             self.assertGreater(np.linalg.norm(aero_moment), 1e-4)
             env._update_puller_speed(1.0)
@@ -1689,6 +1736,29 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             aero_force_b, aero_moment_b = env._compute_aero_wrench()
             np.testing.assert_allclose(aero_force_b, np.zeros(3, dtype=float), atol=1e-12)
             np.testing.assert_allclose(aero_moment_b, np.zeros(3, dtype=float), atol=1e-12)
+        finally:
+            env.close()
+
+    def test_standard_vtol_surface_targets_map_normalized_controls_to_actuator_range(self) -> None:
+        env = VTOLEnv(ConfigLoader(_config_path("standard_vtol")))
+        try:
+            self._seed_kinematics(env, pos=np.array([0.0, 0.0, 0.9]), linvel=np.zeros(3))
+            controls = np.zeros(9, dtype=float)
+            controls[:4] = 1.0
+            controls[5] = 1.0
+            env._handle_applied_actuator_controls(controls)
+            env._apply_surface_targets()
+
+            left_idx = env._joint_target_map["left_elevon_joint"]
+            left_act_id = env._surface_actuator_ids[left_idx]
+            _, upper = env._mj_model.actuator_ctrlrange[left_act_id]
+            self.assertAlmostEqual(env._surface_targets[left_idx], float(upper))
+            self.assertAlmostEqual(env._mj_data.ctrl[left_act_id], float(upper))
+
+            actual_angle = -0.2
+            left_joint_id = env._surface_joint_ids[left_idx]
+            env._mj_data.qpos[env._mj_model.jnt_qposadr[left_joint_id]] = actual_angle
+            self.assertAlmostEqual(env._surface_angle("left_elevon_joint"), actual_angle)
         finally:
             env.close()
 
@@ -1738,6 +1808,31 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
 
             buoyancy_force_b, _ = env._compute_buoyancy_force(Rotation.identity())
             self.assertGreater(buoyancy_force_b[2], 100.0)
+        finally:
+            env.close()
+
+    def test_uuv_buoyancy_fraction_decreases_monotonically_through_waterline(self) -> None:
+        env = UUVEnv(ConfigLoader(_config_path("uuv_bluerov2_heavy")))
+        try:
+            surface = env._params.water_surface_z_nwu
+            limit = env._params.buoyancy_height_scale_limit
+            cob_offset_z = float(env._params.buoyancy_origin_b[2])
+            full_buoyancy = env._params.buoyancy_compensation * float(env._mj_model.body_mass[env._base_link_id]) * 9.81
+            samples: list[float] = []
+            for cob_z in (surface - limit, surface, surface + limit):
+                self._seed_kinematics(
+                    env,
+                    pos=np.array([0.0, 0.0, cob_z - cob_offset_z], dtype=float),
+                    linvel=np.zeros(3, dtype=float),
+                )
+                force_b, _ = env._compute_buoyancy_force(Rotation.identity())
+                samples.append(float(force_b[2]))
+
+            self.assertAlmostEqual(samples[0], full_buoyancy)
+            self.assertAlmostEqual(samples[1], 0.5 * full_buoyancy)
+            self.assertAlmostEqual(samples[2], 0.0)
+            self.assertGreaterEqual(samples[0], samples[1])
+            self.assertGreaterEqual(samples[1], samples[2])
         finally:
             env.close()
 

@@ -136,14 +136,10 @@ class UUVEnv(PX4MJEnv):
         mass = float(self._mj_model.body_mass[self._base_link_id])
         buoyancy_force_world = self._params.buoyancy_compensation * mass * np.array([0.0, 0.0, 9.81], dtype=float)
         cob_world = self._get_sensor_raw("pos") + rb.apply(self._params.buoyancy_origin_b)
-        scale = abs(
-            (cob_world[2] - (self._params.water_surface_z_nwu - self._params.buoyancy_height_scale_limit))
-            / (2.0 * self._params.buoyancy_height_scale_limit)
+        scale = (self._params.water_surface_z_nwu + self._params.buoyancy_height_scale_limit - cob_world[2]) / (
+            2.0 * self._params.buoyancy_height_scale_limit
         )
-        if cob_world[2] > self._params.water_surface_z_nwu + self._params.buoyancy_height_scale_limit:
-            scale = 0.0
-        scale = float(np.clip(scale, 0.0, 1.0))
-        force_world = buoyancy_force_world * scale
+        force_world = buoyancy_force_world * float(np.clip(scale, 0.0, 1.0))
         return rb.inv().apply(force_world), self._params.buoyancy_origin_b.copy()
 
     def _compute_thruster_wrenches(

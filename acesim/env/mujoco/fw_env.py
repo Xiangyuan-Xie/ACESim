@@ -295,7 +295,15 @@ class FWEnv(PX4MJEnv):
         ]
         assert not missing_joints, f"Fixed-wing asset missing control-surface joints: {', '.join(missing_joints)}"
         assert not missing_actuators, f"Fixed-wing asset missing control actuators: {', '.join(missing_actuators)}"
-        self._surface_targets = np.zeros(len(self._surface_joint_names), dtype=float)
+        self._surface_ctrl_center = np.zeros(len(self._surface_joint_names), dtype=float)
+        self._surface_ctrl_halfspan = np.ones(len(self._surface_joint_names), dtype=float)
+        for i, actuator_id in enumerate(self._surface_actuator_ids):
+            if actuator_id < 0:
+                continue
+            lower, upper = self._mj_model.actuator_ctrlrange[actuator_id]
+            self._surface_ctrl_center[i] = 0.5 * float(lower + upper)
+            self._surface_ctrl_halfspan[i] = 0.5 * float(upper - lower)
+        self._surface_targets = self._surface_ctrl_center.copy()
         self._joint_target_map = {name: i for i, name in enumerate(self._surface_joint_names)}
         self._last_true_airspeed_mps = 0.0
         self._last_diff_pressure_hpa = 0.0
@@ -312,12 +320,11 @@ class FWEnv(PX4MJEnv):
 
     def _handle_applied_actuator_controls(self, controls: np.ndarray) -> None:
         self._applied_actuator_controls = np.asarray(controls, dtype=float)
-        self._surface_targets[:] = 0.0
+        self._surface_targets[:] = self._surface_ctrl_center
         for i, (channel_idx, sign) in enumerate(zip(self._surface_control_indices, self._surface_control_signs)):
             if 0 <= int(channel_idx) < len(self._applied_actuator_controls):
-                self._surface_targets[i] = float(
-                    np.clip(sign * self._applied_actuator_controls[int(channel_idx)], -1.0, 1.0)
-                )
+                normalized = float(np.clip(sign * self._applied_actuator_controls[int(channel_idx)], -1.0, 1.0))
+                self._surface_targets[i] = self._surface_ctrl_center[i] + normalized * self._surface_ctrl_halfspan[i]
         if 0 <= self._throttle_control_index < len(self._applied_actuator_controls):
             self._desired_puller_angular_velocity = (
                 float(np.clip(self._applied_actuator_controls[self._throttle_control_index], 0.0, 1.0))
@@ -375,9 +382,9 @@ class FWEnv(PX4MJEnv):
 
     def _surface_angle(self, joint_name: str) -> float:
         idx = self._joint_target_map.get(joint_name)
-        if idx is None:
+        if idx is None or self._surface_joint_ids[idx] < 0:
             return 0.0
-        return float(self._surface_targets[idx])
+        return float(self._mj_data.qpos[self._mj_model.jnt_qposadr[self._surface_joint_ids[idx]]])
 
     def _surface_angle_deg(self, joint_name: str) -> float:
         return float(np.degrees(self._surface_angle(joint_name)))
