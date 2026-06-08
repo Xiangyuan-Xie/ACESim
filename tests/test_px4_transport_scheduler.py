@@ -159,6 +159,46 @@ class PX4TransportSchedulerTests(unittest.TestCase):
         self.assertAlmostEqual(params.ekf2_eva_noise, 0.01)
         self.assertFalse(hasattr(params, "vision_position_variance_m2"))
         self.assertFalse(hasattr(params, "vision_orientation_variance_rad2"))
+        self.assertEqual(params.hil_sensor_delay_ms, (0.0, 0.0))
+        self.assertEqual(params.vision_delay_ms, (0.0, 0.0))
+
+    def test_px4_delay_ranges_are_parsed_from_asset_params(self) -> None:
+        params = PX4SensorParams.from_asset_params(
+            {
+                "px4_fusion": {
+                    "mode": "mocap",
+                    "mocap": {"hil_sensor_rate_hz": 200.0, "vision_rate_hz": 100.0},
+                    "delay": {
+                        "hil_sensor_delay_ms": [0.076, 0.113],
+                        "vision_delay_ms": [0.0, 0.0],
+                        "actuator_delay_ms": [1.5, 2.5],
+                    },
+                }
+            },
+            dynamic_hil_sensor_fields=False,
+        )
+        actuator_params = PX4ActuatorParams.from_asset_params(
+            {
+                "px4_fusion": {
+                    "delay": {
+                        "actuator_delay_ms": [1.5, 2.5],
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(params.hil_sensor_delay_ms, (0.076, 0.113))
+        self.assertEqual(params.vision_delay_ms, (0.0, 0.0))
+        self.assertEqual(actuator_params.actuator_delay_ms, (1.5, 2.5))
+
+    def test_delay_ranges_reject_invalid_bounds(self) -> None:
+        with self.assertRaisesRegex(ValueError, "hil_sensor_delay_ms"):
+            PX4SensorParams.from_asset_params(
+                {"px4_fusion": {"mode": "mocap", "mocap": {}, "delay": {"hil_sensor_delay_ms": [2.0, 1.0]}}},
+                dynamic_hil_sensor_fields=False,
+            )
+        with self.assertRaisesRegex(ValueError, "actuator_delay_ms"):
+            PX4ActuatorParams.from_asset_params({"px4_fusion": {"delay": {"actuator_delay_ms": [-1.0, 1.0]}}})
 
     def test_mocap_asset_configs_keep_declared_fusion_parameters(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -350,6 +390,116 @@ class PX4TransportSchedulerTests(unittest.TestCase):
         np.testing.assert_allclose(transport.hil_sensor_calls[0]["accel_frd"], np.array([2.0, 0.0, 0.0]))
         clock.close()
 
+    def test_hil_sensor_delay_releases_sample_with_original_sample_timestamp(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=200.0,
+            vision_rate_hz=100.0,
+            accel_noise_std_mps2=(0.0, 0.0, 0.0),
+            gyro_noise_std_radps=0.0,
+            hil_sensor_delay_ms=(2.0, 2.0),
+        )
+        samples = [
+            np.array([1.0, 0.0, 0.0], dtype=float),
+            np.array([2.0, 0.0, 0.0], dtype=float),
+        ]
+
+        def read_sample() -> PX4SensorSample:
+            accel = samples.pop(0) if samples else np.array([9.0, 0.0, 0.0], dtype=float)
+            return PX4SensorSample(
+                accel_frd=accel,
+                gyro_frd=np.zeros(3, dtype=float),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=np.zeros(3, dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+
+        clock.advance_us(5_000)
+        self.assertFalse(scheduler.update())
+        self.assertFalse(transport.hil_sensor_calls)
+
+        clock.advance_us(1_999)
+        self.assertFalse(scheduler.update())
+        self.assertFalse(transport.hil_sensor_calls)
+
+        clock.advance_us(1)
+        self.assertTrue(scheduler.update())
+        self.assertEqual(transport.hil_sensor_calls[0]["timestamp_us"], 5_000)
+        np.testing.assert_allclose(transport.hil_sensor_calls[0]["accel_frd"], np.array([2.0, 0.0, 0.0]))
+        clock.close()
+
+    def test_hil_sensor_delay_keeps_unreleased_samples_when_delay_exceeds_period(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=200.0,
+            vision_rate_hz=100.0,
+            accel_noise_std_mps2=(0.0, 0.0, 0.0),
+            gyro_noise_std_radps=0.0,
+            hil_sensor_delay_ms=(7.0, 7.0),
+        )
+        next_sample = 0
+
+        def read_sample() -> PX4SensorSample:
+            nonlocal next_sample
+            next_sample += 1
+            return PX4SensorSample(
+                accel_frd=np.array([float(next_sample), 0.0, 0.0], dtype=float),
+                gyro_frd=np.zeros(3, dtype=float),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=np.zeros(3, dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        clock.advance_us(5_000)
+        self.assertFalse(scheduler.update())
+        clock.advance_us(5_000)
+        self.assertFalse(scheduler.update())
+        clock.advance_us(2_000)
+        self.assertTrue(scheduler.update())
+
+        self.assertEqual(transport.hil_sensor_calls[0]["timestamp_us"], 5_000)
+        np.testing.assert_allclose(transport.hil_sensor_calls[0]["accel_frd"], np.array([2.0, 0.0, 0.0]))
+        clock.close()
+
+    def test_vision_delay_releases_pose_with_original_sample_timestamp(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=200.0,
+            vision_rate_hz=100.0,
+            vision_delay_ms=(3.0, 3.0),
+        )
+
+        def read_sample() -> PX4SensorSample:
+            return PX4SensorSample(
+                accel_frd=np.zeros(3, dtype=float),
+                gyro_frd=np.zeros(3, dtype=float),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=np.array([1.0, 2.0, 3.0], dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        clock.advance_us(10_000)
+        scheduler.update()
+        self.assertFalse(transport.vision_calls)
+
+        clock.advance_us(3_000)
+        scheduler.update()
+        self.assertEqual(transport.vision_calls[0]["args"][0], 10_000)
+        clock.close()
+
     @patch("acesim.utils.px4_transport.mavutil.mavlink_connection")
     def test_signed_hil_actuator_controls_are_accepted(self, mock_connection: MagicMock) -> None:
         connection = _FakeConnection()
@@ -382,6 +532,24 @@ class PX4TransportSchedulerTests(unittest.TestCase):
             SimpleNamespace(controls=np.array([0.2, 0.7], dtype=float)),
         )
         self.assertTrue(transport.update_actuator_commands(sim_time_us=6_000, channel_count=2))
+        np.testing.assert_allclose(transport.read_applied_actuator_controls(2), np.array([0.2, 0.7], dtype=float))
+        transport.close()
+
+    @patch("acesim.utils.px4_transport.mavutil.mavlink_connection")
+    def test_actuator_delay_holds_frame_until_release_time(self, mock_connection: MagicMock) -> None:
+        connection = _FakeConnection()
+        mock_connection.return_value = connection
+        transport = PX4Transport(PX4ActuatorParams(actuator_delay_ms=(3.0, 3.0)))
+        transport._is_connected = True
+        connection.enqueue(
+            "HIL_ACTUATOR_CONTROLS",
+            SimpleNamespace(controls=np.array([0.2, 0.7], dtype=float)),
+        )
+
+        self.assertFalse(transport.update_actuator_commands(sim_time_us=10_000, channel_count=2))
+        self.assertIsNone(transport.read_applied_actuator_controls(2))
+        self.assertFalse(transport.update_actuator_commands(sim_time_us=12_999, channel_count=2))
+        self.assertTrue(transport.update_actuator_commands(sim_time_us=13_000, channel_count=2))
         np.testing.assert_allclose(transport.read_applied_actuator_controls(2), np.array([0.2, 0.7], dtype=float))
         transport.close()
 

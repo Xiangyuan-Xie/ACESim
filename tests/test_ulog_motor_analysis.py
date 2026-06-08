@@ -7,6 +7,7 @@ from acesim.tools.analysis_ulog import (
     build_nav_intervals,
     format_log_row,
     run_tui,
+    summarize_delay_report,
     summarize_motor_window,
     summarize_px4_timing_evidence,
 )
@@ -98,6 +99,50 @@ def test_summarize_px4_timing_evidence_marks_actuator_latency_not_estimable_with
     assert "ulog_recorded_rate=10.000 Hz" in joined
     assert "timestamp_sample_delay=not estimable" in joined
     assert "no timestamp_sample" in joined
+
+
+def test_summarize_delay_report_marks_am30_strong_and_diagnostic_ranges() -> None:
+    topics = {
+        "am_policy_observation": {
+            "timestamp": np.array([1_000, 2_000, 3_000], dtype=np.uint64),
+            "timestamp_sample": np.array([800, 1_850, 2_900], dtype=np.uint64),
+            "am_setpoint_timestamp": np.array([900, 1_000, 1_500], dtype=np.uint64),
+            **{f"observation[{idx}]": np.zeros(3, dtype=float) for idx in range(30)},
+        },
+        "actuator_outputs": {
+            "timestamp": np.array([1_000, 2_000, 3_000], dtype=np.uint64),
+        },
+        "arm_joint_state": {
+            "timestamp": np.array([500, 1_500, 2_500], dtype=np.uint64),
+        },
+    }
+
+    lines = summarize_delay_report(topics)
+    joined = "\n".join(lines)
+
+    assert "am_policy_observation_dim=30" in joined
+    assert "am_policy_compute_delay_ms" in joined
+    assert "evidence=strong" in joined
+    assert "actuator_delay_ms" in joined
+    assert "evidence=not_estimable" in joined
+    assert "arm_joint_state_latest_source_age_ms" in joined
+    assert "evidence=diagnostic_only" in joined
+    assert "suggested_toml" in joined
+
+
+def test_summarize_delay_report_warns_for_legacy_am35_observation() -> None:
+    topics = {
+        "am_policy_observation": {
+            "timestamp": np.array([1_000, 2_000], dtype=np.uint64),
+            "timestamp_sample": np.array([900, 1_900], dtype=np.uint64),
+            **{f"observation[{idx}]": np.zeros(2, dtype=float) for idx in range(35)},
+        }
+    }
+
+    lines = summarize_delay_report(topics)
+
+    assert any("am_policy_observation_dim=35" in line for line in lines)
+    assert any("legacy observation dimension" in line for line in lines)
 
 
 def test_format_log_row_shows_only_filename_and_modified_date(tmp_path) -> None:

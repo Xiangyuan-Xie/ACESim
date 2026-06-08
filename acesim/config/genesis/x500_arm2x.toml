@@ -10,6 +10,9 @@ max_rot_velocity = 1100.0
 max_relative_airspeed_mps = 25.0
 rotor_radius = 0.127
 
+[params.arm.delay]
+joint_state_delay_ms = [0.0, 0.0]
+
 [params.px4_fusion]
 mode = "hil"
 
@@ -32,3 +35,8 @@ ekf2_evv_noise = 0.01
 ekf2_eva_noise = 0.01
 ekf2_gps_ctrl = 0
 ekf2_mag_type = 0
+
+[params.px4_fusion.delay]
+hil_sensor_delay_ms = [0.0, 0.0]
+vision_delay_ms = [0.0, 0.0]
+actuator_delay_ms = [0.0, 0.0]

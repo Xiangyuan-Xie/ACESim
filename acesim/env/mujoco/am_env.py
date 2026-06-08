@@ -4,6 +4,7 @@ import json
 import math
 import os
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.mc_env import MCEnv
 from acesim.utils.arm_servo_scheduler import ArmControlSample, ArmServoScheduler, ArmStateSample
 from acesim.utils.arm_state_publisher import ArmStatePublisher
+from acesim.utils.delay import parse_delay_range_ms
 from acesim.utils.math import calculate_coupled_gripper_positions
 
 
@@ -25,6 +27,7 @@ class AMParams:
     arm_control_rate_hz: float
     arm_state_publish_rate_hz: float
     arm_motion_max_velocity: list[float]
+    joint_state_delay_ms: tuple[float, float]
 
 
 @dataclass
@@ -67,12 +70,22 @@ class AMEnv(MCEnv):
         super().__init__(config_loader)
         asset_params = config_loader.get_asset_params()
         config = asset_params
+        arm_config = config.get("arm", {})
+        if not isinstance(arm_config, Mapping):
+            raise ValueError("arm must be a table")
+        arm_delay_config = arm_config.get("delay", {})
+        if not isinstance(arm_delay_config, Mapping):
+            raise ValueError("arm.delay must be a table")
         self._arm_params = AMParams(
             arm_control_rate_hz=float(config.get("arm_control_rate_hz", 50.0)),
             arm_state_publish_rate_hz=float(config.get("arm_state_publish_rate_hz", 250.0)),
             arm_motion_max_velocity=self._parse_arm_motion_limit(
                 config.get("arm_motion_max_velocity", _DEFAULT_ARM_MOTION_MAX_VELOCITY),
                 name="arm_motion_max_velocity",
+            ),
+            joint_state_delay_ms=parse_delay_range_ms(
+                arm_delay_config.get("joint_state_delay_ms", (0.0, 0.0)),
+                "joint_state_delay_ms",
             ),
         )
         self._robot = None if self._fixed_arm_pose is not None or self._arm_command_only else make_robot()
@@ -94,6 +107,7 @@ class AMEnv(MCEnv):
             read_control_target=self._read_arm_control_target,
             apply_control=self._apply_arm_control,
             read_state=self._read_arm_joint_state,
+            joint_state_delay_ms=self._arm_params.joint_state_delay_ms,
         )
         self._reset_to_home()
         if self._fixed_arm_pose is not None:

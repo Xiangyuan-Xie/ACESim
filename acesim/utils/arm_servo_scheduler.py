@@ -9,7 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
+import numpy as np
+
 from acesim.utils.arm_state_publisher import ArmStatePublisher
+from acesim.utils.delay import parse_delay_range_ms
 from acesim.utils.simulation_clock import SimulationClock
 
 
@@ -29,6 +32,13 @@ class ArmStateSample:
     efforts: Sequence[float]
 
 
+@dataclass(frozen=True)
+class _DelayedArmState:
+    sample_time_us: int
+    release_time_us: int
+    sample: ArmStateSample
+
+
 class ArmServoScheduler:
     """Schedule arm control and arm state publication from simulation time."""
 
@@ -41,6 +51,7 @@ class ArmServoScheduler:
         read_control_target: Callable[[], ArmControlSample | None],
         apply_control: Callable[[ArmControlSample], None],
         read_state: Callable[[], ArmStateSample],
+        joint_state_delay_ms: tuple[float, float] = (0.0, 0.0),
     ) -> None:
         if control_rate_hz <= 0.0:
             raise ValueError("control_rate_hz must be positive")
@@ -54,9 +65,11 @@ class ArmServoScheduler:
         self._read_state: Callable[[], ArmStateSample] = read_state
         self._control_period_s: float = 1.0 / float(control_rate_hz)
         self._state_publish_period_s: float = 1.0 / float(state_publish_rate_hz)
+        self._joint_state_delay_ms = parse_delay_range_ms(joint_state_delay_ms, "joint_state_delay_ms")
         self._last_update_time_us: int = 0
         self._control_elapsed_s: float = 0.0
         self._state_publish_elapsed_s: float = 0.0
+        self._pending_states: list[_DelayedArmState] = []
 
         self.reset()
 
@@ -66,6 +79,7 @@ class ArmServoScheduler:
         self._last_update_time_us = self._clock.current_time_us
         self._control_elapsed_s = 0.0
         self._state_publish_elapsed_s = 0.0
+        self._pending_states.clear()
 
     def update(self) -> None:
         """Run any arm control or state publication work due this tick."""
@@ -91,9 +105,35 @@ class ArmServoScheduler:
             state_due = True
         if state_due:
             state_sample = self._read_state()
+            delay_min_ms, delay_max_ms = self._joint_state_delay_ms
+            if delay_max_ms <= 0.0:
+                self._publisher.publish(
+                    current_time_us,
+                    state_sample.positions,
+                    state_sample.velocities,
+                    state_sample.efforts,
+                )
+            else:
+                delay_ms = (
+                    delay_min_ms
+                    if delay_min_ms == delay_max_ms
+                    else float(np.random.uniform(delay_min_ms, delay_max_ms))
+                )
+                self._pending_states.append(
+                    _DelayedArmState(
+                        sample_time_us=current_time_us,
+                        release_time_us=int(round(current_time_us + delay_ms * 1000.0)),
+                        sample=state_sample,
+                    )
+                )
+
+        due_states = [item for item in self._pending_states if item.release_time_us <= current_time_us]
+        if due_states:
+            item = due_states[-1]
             self._publisher.publish(
-                current_time_us,
-                state_sample.positions,
-                state_sample.velocities,
-                state_sample.efforts,
+                item.sample_time_us,
+                item.sample.positions,
+                item.sample.velocities,
+                item.sample.efforts,
             )
+            self._pending_states = [item for item in self._pending_states if item.release_time_us > current_time_us]

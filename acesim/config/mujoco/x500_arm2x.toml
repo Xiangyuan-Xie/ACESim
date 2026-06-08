@@ -35,6 +35,9 @@ wake_speed_scale = 1.0
 wake_spread_angle_rad = 0.20
 axial_decay_m = 0.45
 
+[params.arm.delay]
+joint_state_delay_ms = [0.0, 0.0]
+
 [params.px4_fusion]
 mode = "mocap"
 
@@ -57,6 +60,11 @@ ekf2_evv_noise = 0.01
 ekf2_eva_noise = 0.01
 ekf2_gps_ctrl = 0
 ekf2_mag_type = 0
+
+[params.px4_fusion.delay]
+hil_sensor_delay_ms = [0.0, 0.0]
+vision_delay_ms = [0.0, 0.0]
+actuator_delay_ms = [0.0, 0.0]
 
 [params.visual_stream]
 enabled = true

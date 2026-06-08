@@ -225,6 +225,155 @@ def _sample_delay_ms(topic_data: dict[str, np.ndarray]) -> float | None:
     return float(np.median(delays_ms))
 
 
+def _sample_delay_values_ms(topic_data: dict[str, np.ndarray]) -> np.ndarray:
+    if "timestamp" not in topic_data or "timestamp_sample" not in topic_data:
+        return np.array([], dtype=np.float64)
+    timestamps = np.asarray(topic_data["timestamp"], dtype=np.float64)
+    samples = np.asarray(topic_data["timestamp_sample"], dtype=np.float64)
+    count = min(timestamps.size, samples.size)
+    if count == 0:
+        return np.array([], dtype=np.float64)
+    delays_ms = (timestamps[:count] - samples[:count]) * 1e-3
+    return delays_ms[np.isfinite(delays_ms)]
+
+
+def _format_quantiles_ms(values: np.ndarray) -> str:
+    finite = np.asarray(values, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return "p05=nan p50=nan p95=nan p99=nan samples=0"
+    p05, p50, p95, p99 = np.percentile(finite, [5.0, 50.0, 95.0, 99.0])
+    return f"p05={p05:.3f} p50={p50:.3f} p95={p95:.3f} p99={p99:.3f} samples={finite.size}"
+
+
+def _latest_source_age_values_ms(consumer_timestamps: np.ndarray, source_timestamps: np.ndarray) -> np.ndarray:
+    consumers = np.asarray(consumer_timestamps, dtype=np.float64)
+    sources = np.asarray(source_timestamps, dtype=np.float64)
+    consumers = consumers[np.isfinite(consumers)]
+    sources = np.sort(sources[np.isfinite(sources)])
+    if consumers.size == 0 or sources.size == 0:
+        return np.array([], dtype=np.float64)
+    source_indices = np.searchsorted(sources, consumers, side="right") - 1
+    valid = source_indices >= 0
+    if not np.any(valid):
+        return np.array([], dtype=np.float64)
+    return (consumers[valid] - sources[source_indices[valid]]) * 1e-3
+
+
+def summarize_delay_report(topics: dict[str, dict[str, np.ndarray]]) -> list[str]:
+    """Summarize timestamp-derived delay evidence for optional sim fidelity settings."""
+
+    lines = ["Log-derived random delay evidence:"]
+    am_policy = topics.get("am_policy_observation")
+    observation_indices: list[int] = []
+    if am_policy is not None:
+        for key in am_policy:
+            if key.startswith("observation[") and key.endswith("]"):
+                try:
+                    observation_indices.append(int(key.removeprefix("observation[").removesuffix("]")))
+                except ValueError:
+                    continue
+    observation_dim = max(observation_indices) + 1 if observation_indices else 0
+    if observation_dim:
+        lines.append(f"  am_policy_observation_dim={observation_dim}")
+        if observation_dim != 30:
+            lines.append(
+                "  warning: legacy observation dimension; current default recommendations use 30D AM logs only"
+            )
+    else:
+        lines.append("  am_policy_observation_dim=unknown")
+
+    hil_sensor_delays = [
+        _sample_delay_values_ms(topic_data)
+        for topic_name in ("sensor_gyro", "sensor_accel")
+        if (topic_data := topics.get(topic_name)) is not None
+    ]
+    hil_sensor_delay_ms = (
+        np.concatenate([values for values in hil_sensor_delays if values.size])
+        if any(values.size for values in hil_sensor_delays)
+        else np.array([], dtype=np.float64)
+    )
+    if hil_sensor_delay_ms.size:
+        lines.append(
+            "  hil_sensor_delay_ms evidence=strong "
+            + _format_quantiles_ms(hil_sensor_delay_ms)
+            + " source=sensor_gyro/sensor_accel timestamp-timestamp_sample"
+        )
+    else:
+        lines.append("  hil_sensor_delay_ms evidence=insufficient p05=nan p50=nan p95=nan p99=nan samples=0")
+
+    if am_policy is not None:
+        am_policy_delay_ms = _sample_delay_values_ms(am_policy)
+        evidence = "strong" if observation_dim == 30 and am_policy_delay_ms.size else "diagnostic_only"
+        lines.append(
+            "  am_policy_compute_delay_ms evidence="
+            + evidence
+            + " "
+            + _format_quantiles_ms(am_policy_delay_ms)
+            + " source=am_policy_observation timestamp-timestamp_sample"
+        )
+        if "am_setpoint_timestamp" in am_policy:
+            policy_timestamps = np.asarray(am_policy["timestamp"], dtype=np.float64)
+            setpoint_timestamps = np.asarray(am_policy["am_setpoint_timestamp"], dtype=np.float64)
+            count = min(policy_timestamps.size, setpoint_timestamps.size)
+            setpoint_age_ms = (policy_timestamps[:count] - setpoint_timestamps[:count]) * 1e-3
+            lines.append(
+                "  trajectory_setpoint_latest_source_age_ms evidence=diagnostic_only "
+                + _format_quantiles_ms(setpoint_age_ms[np.isfinite(setpoint_age_ms)])
+            )
+
+    for topic_name, label in (
+        ("vehicle_attitude", "vehicle_attitude_delay_ms"),
+        ("vehicle_local_position", "vehicle_local_position_delay_ms"),
+    ):
+        topic_data = topics.get(topic_name)
+        if topic_data is None:
+            continue
+        lines.append(
+            f"  {label} evidence=diagnostic_only "
+            + _format_quantiles_ms(_sample_delay_values_ms(topic_data))
+            + f" source={topic_name} timestamp-timestamp_sample"
+        )
+
+    if am_policy is not None and "timestamp" in am_policy:
+        consumer_timestamps = np.asarray(am_policy["timestamp"], dtype=np.float64)
+        for topic_name, label in (
+            ("arm_joint_state", "arm_joint_state_latest_source_age_ms"),
+            ("actuator_outputs", "actuator_outputs_latest_source_age_ms"),
+        ):
+            topic_data = topics.get(topic_name)
+            if topic_data is not None and "timestamp" in topic_data:
+                lines.append(
+                    f"  {label} evidence=diagnostic_only "
+                    + _format_quantiles_ms(
+                        _latest_source_age_values_ms(consumer_timestamps, np.asarray(topic_data["timestamp"]))
+                    )
+                )
+
+    actuator_outputs = topics.get("actuator_outputs")
+    if actuator_outputs is None or "timestamp_sample" not in actuator_outputs:
+        lines.append("  actuator_delay_ms evidence=not_estimable reason=actuator_outputs has no timestamp_sample")
+    else:
+        lines.append(
+            "  actuator_delay_ms evidence=diagnostic_only "
+            + _format_quantiles_ms(_sample_delay_values_ms(actuator_outputs))
+        )
+
+    lines.extend(
+        [
+            "  suggested_toml:",
+            "    [params.px4_fusion.delay]",
+            "    hil_sensor_delay_ms = [0.0, 0.0]  # optional_am30_p05_p95 = [0.076, 0.113]",
+            "    vision_delay_ms = [0.0, 0.0]",
+            "    actuator_delay_ms = [0.0, 0.0]  # not_estimable_from_actuator_outputs",
+            "",
+            "    [params.arm.delay]",
+            "    joint_state_delay_ms = [0.0, 0.0]  # source-age diagnostic, not communication delay",
+        ]
+    )
+    return lines
+
+
 def summarize_px4_timing_evidence(topics: dict[str, dict[str, np.ndarray]]) -> list[str]:
     """Summarize PX4 source-backed timing evidence from extracted ULog topic arrays."""
 
@@ -305,6 +454,7 @@ def analyze_log(log_path: Path, output_dir: Path) -> AnalysisResult:
                 times_s=times_s,
                 controls=controls,
                 px4_timing_evidence=summarize_px4_timing_evidence(timing_topics),
+                delay_report=summarize_delay_report(timing_topics),
             )
         )
         + "\n",
@@ -384,6 +534,7 @@ def _summary_lines(
     times_s: np.ndarray,
     controls: np.ndarray,
     px4_timing_evidence: Sequence[str] | None = None,
+    delay_report: Sequence[str] | None = None,
 ) -> list[str]:
     lines = [
         f"ULog: {log_path}",
@@ -428,6 +579,8 @@ def _summary_lines(
     lines.extend(summarize_motor_window("POSCTL after 29.192 s window", times_s, controls, times_s >= 29.192))
     if px4_timing_evidence is not None:
         lines.extend(["", *px4_timing_evidence])
+    if delay_report is not None:
+        lines.extend(["", *delay_report])
     return lines
 
 
@@ -500,6 +653,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("log", nargs="?", type=Path, help="Analyze this .ulg directly. Omit to open the curses picker.")
     parser.add_argument("--output-dir", type=Path, default=project_root() / DEFAULT_OUTPUT_DIR)
     parser.add_argument("--glob", default=DEFAULT_LOG_GLOB, help="Log glob used by the curses picker.")
+    parser.add_argument("--delay-report", action="store_true", help="Print timestamp-derived delay evidence to stdout.")
     return parser.parse_args()
 
 
@@ -509,6 +663,9 @@ def main() -> None:
         result = analyze_log(args.log.resolve(), args.output_dir.resolve())
         print(f"Figure: {result.figure_path}")
         print(f"Summary: {result.summary_path}")
+        if args.delay_report:
+            ulog = ULog(str(args.log.resolve()))
+            print("\n".join(summarize_delay_report({dataset.name: dataset.data for dataset in ulog.data_list})))
         if not result.am_active_detected:
             print("Note: no confirmed AM Position active nav_state was detected in this log.")
         return

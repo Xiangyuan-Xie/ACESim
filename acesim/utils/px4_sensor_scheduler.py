@@ -83,6 +83,27 @@ class PX4SensorSample:
     temperature_celsius: float = 25.0
 
 
+@dataclass(frozen=True)
+class _DelayedHilSensor:
+    sample_time_us: int
+    release_time_us: int
+    accel_frd: FloatArray
+    gyro_frd: FloatArray
+    mag_frd: FloatArray
+    altitude_m: float
+    diff_pressure_hpa: float
+    temperature_celsius: float
+    fields_updated: int
+
+
+@dataclass(frozen=True)
+class _DelayedVision:
+    sample_time_us: int
+    release_time_us: int
+    position_world_m: FloatArray
+    attitude_world_quat: FloatArray
+
+
 class PX4SensorScheduler:
     """Publish PX4 HIL sensor and GPS streams from simulation time.
 
@@ -125,6 +146,8 @@ class PX4SensorScheduler:
         self._last_temperature_celsius: float = 25.0
         self._mag_pending: bool = False
         self._baro_pending: bool = False
+        self._pending_hil_sensor: list[_DelayedHilSensor] = []
+        self._pending_vision: list[_DelayedVision] = []
 
         self.reset()
 
@@ -175,6 +198,8 @@ class PX4SensorScheduler:
         self._last_temperature_celsius = float(sample.temperature_celsius)
         self._mag_pending = self._params.send_mag
         self._baro_pending = self._params.send_baro
+        self._pending_hil_sensor.clear()
+        self._pending_vision.clear()
         self._last_sent_vision_quat: FloatArray | None = (
             attitude_world_quat.copy() if self._params.send_vision else None
         )
@@ -225,38 +250,48 @@ class PX4SensorScheduler:
                 self._vision_elapsed_s -= self._vision_period_s
                 vision_due = True
 
-        if not (mag_due or baro_due or hil_due or gps_due or vision_due):
+        pending_due = any(item.release_time_us <= current_time_us for item in self._pending_hil_sensor) or any(
+            item.release_time_us <= current_time_us for item in self._pending_vision
+        )
+        if not (mag_due or baro_due or hil_due or gps_due or vision_due or pending_due):
             return False
 
-        sample = self._read_sensor_sample()
-        accel_frd = np.asarray(sample.accel_frd, dtype=float)
-        gyro_frd = np.asarray(sample.gyro_frd, dtype=float)
-        mag_frd = np.asarray(sample.mag_frd, dtype=float)
-        position_world_m = np.asarray(sample.position_world_m, dtype=float)
-        velocity_world_mps = np.asarray(sample.velocity_world_mps, dtype=float)
-        attitude_world_quat = np.asarray(sample.attitude_world_quat, dtype=float)
-        diff_pressure_hpa = 0.0 if sample.diff_pressure_hpa is None else float(sample.diff_pressure_hpa)
-        temperature_celsius = float(sample.temperature_celsius)
-        if accel_frd.ndim != 1:
-            raise ValueError("accel_frd must be a flat 1D array")
-        if gyro_frd.ndim != 1:
-            raise ValueError("gyro_frd must be a flat 1D array")
-        if mag_frd.ndim != 1:
-            raise ValueError("mag_frd must be a flat 1D array")
-        if position_world_m.ndim != 1:
-            raise ValueError("position_world_m must be a flat 1D array")
-        if velocity_world_mps.ndim != 1:
-            raise ValueError("velocity_world_mps must be a flat 1D array")
-        if attitude_world_quat.ndim != 1 or attitude_world_quat.size != 4:
-            raise ValueError("attitude_world_quat must be a flat 4D array")
+        sample = None
+        accel_frd = gyro_frd = mag_frd = position_world_m = velocity_world_mps = attitude_world_quat = None
+        diff_pressure_hpa = 0.0
+        temperature_celsius = 25.0
+        if mag_due or baro_due or hil_due or gps_due or vision_due:
+            sample = self._read_sensor_sample()
+            accel_frd = np.asarray(sample.accel_frd, dtype=float)
+            gyro_frd = np.asarray(sample.gyro_frd, dtype=float)
+            mag_frd = np.asarray(sample.mag_frd, dtype=float)
+            position_world_m = np.asarray(sample.position_world_m, dtype=float)
+            velocity_world_mps = np.asarray(sample.velocity_world_mps, dtype=float)
+            attitude_world_quat = np.asarray(sample.attitude_world_quat, dtype=float)
+            diff_pressure_hpa = 0.0 if sample.diff_pressure_hpa is None else float(sample.diff_pressure_hpa)
+            temperature_celsius = float(sample.temperature_celsius)
+            if accel_frd.ndim != 1:
+                raise ValueError("accel_frd must be a flat 1D array")
+            if gyro_frd.ndim != 1:
+                raise ValueError("gyro_frd must be a flat 1D array")
+            if mag_frd.ndim != 1:
+                raise ValueError("mag_frd must be a flat 1D array")
+            if position_world_m.ndim != 1:
+                raise ValueError("position_world_m must be a flat 1D array")
+            if velocity_world_mps.ndim != 1:
+                raise ValueError("velocity_world_mps must be a flat 1D array")
+            if attitude_world_quat.ndim != 1 or attitude_world_quat.size != 4:
+                raise ValueError("attitude_world_quat must be a flat 4D array")
 
         if self._params.send_mag:
             if mag_due:
+                assert mag_frd is not None
                 self._last_mag_frd = mag_frd + np.random.normal(0.0, self._params.mag_noise_std_gauss, size=3)
                 self._mag_pending = True
 
         if self._params.send_baro:
             if baro_due:
+                assert position_world_m is not None
                 self._last_baro_altitude_m = float(
                     self._params.gps_alt_start
                     + position_world_m[2]
@@ -266,6 +301,9 @@ class PX4SensorScheduler:
 
         sensor_sent = False
         if hil_due:
+            assert sample is not None
+            assert accel_frd is not None
+            assert gyro_frd is not None
             self._last_accel_frd = accel_frd + np.random.normal(0.0, self._params.accel_noise_std_mps2)
             self._last_gyro_frd = gyro_frd + np.random.normal(0.0, self._params.gyro_noise_std_radps, size=3)
             self._last_diff_pressure_hpa = diff_pressure_hpa
@@ -277,22 +315,45 @@ class PX4SensorScheduler:
                 fields |= self._px4_transport.HIL_SENSOR_FIELDS_DIFF_PRESS
             if self._params.send_baro and self._baro_pending:
                 fields |= self._px4_transport.HIL_SENSOR_FIELDS_BARO
-            self._px4_transport.send_hil_sensor(
-                current_time_us,
-                self._last_accel_frd,
-                self._last_gyro_frd,
-                self._last_mag_frd,
-                self._last_baro_altitude_m,
-                diff_pressure_hpa=self._last_diff_pressure_hpa,
-                temperature_celsius=self._last_temperature_celsius,
-                fields_updated=fields,
-            )
+            delay_min_ms, delay_max_ms = self._params.hil_sensor_delay_ms
+            if delay_max_ms <= 0.0:
+                self._px4_transport.send_hil_sensor(
+                    current_time_us,
+                    self._last_accel_frd,
+                    self._last_gyro_frd,
+                    self._last_mag_frd,
+                    self._last_baro_altitude_m,
+                    diff_pressure_hpa=self._last_diff_pressure_hpa,
+                    temperature_celsius=self._last_temperature_celsius,
+                    fields_updated=fields,
+                )
+                sensor_sent = True
+            else:
+                delay_ms = (
+                    delay_min_ms
+                    if delay_min_ms == delay_max_ms
+                    else float(np.random.uniform(delay_min_ms, delay_max_ms))
+                )
+                self._pending_hil_sensor.append(
+                    _DelayedHilSensor(
+                        sample_time_us=current_time_us,
+                        release_time_us=int(round(current_time_us + delay_ms * 1000.0)),
+                        accel_frd=self._last_accel_frd.copy(),
+                        gyro_frd=self._last_gyro_frd.copy(),
+                        mag_frd=self._last_mag_frd.copy(),
+                        altitude_m=self._last_baro_altitude_m,
+                        diff_pressure_hpa=self._last_diff_pressure_hpa,
+                        temperature_celsius=self._last_temperature_celsius,
+                        fields_updated=fields,
+                    )
+                )
             self._mag_pending = False
             self._baro_pending = False
-            sensor_sent = True
 
         if self._params.send_gps:
             if gps_due:
+                assert position_world_m is not None
+                assert velocity_world_mps is not None
                 noisy_position_world_m = position_world_m + np.random.normal(
                     0.0, self._params.gps_pos_noise_std_m, size=3
                 )
@@ -329,13 +390,59 @@ class PX4SensorScheduler:
 
         if self._params.send_vision:
             if vision_due:
+                assert position_world_m is not None
+                assert attitude_world_quat is not None
                 if self._vision_attitude_is_plausible(attitude_world_quat):
-                    self._px4_transport.send_vision_position_estimate(
-                        current_time_us,
-                        position_world_m,
-                        attitude_world_quat,
-                    )
+                    delay_min_ms, delay_max_ms = self._params.vision_delay_ms
+                    if delay_max_ms <= 0.0:
+                        self._px4_transport.send_vision_position_estimate(
+                            current_time_us,
+                            position_world_m,
+                            attitude_world_quat,
+                        )
+                    else:
+                        delay_ms = (
+                            delay_min_ms
+                            if delay_min_ms == delay_max_ms
+                            else float(np.random.uniform(delay_min_ms, delay_max_ms))
+                        )
+                        self._pending_vision.append(
+                            _DelayedVision(
+                                sample_time_us=current_time_us,
+                                release_time_us=int(round(current_time_us + delay_ms * 1000.0)),
+                                position_world_m=position_world_m.copy(),
+                                attitude_world_quat=attitude_world_quat.copy(),
+                            )
+                        )
                     self._last_sent_vision_quat = attitude_world_quat.copy()
+
+        due_hil = [item for item in self._pending_hil_sensor if item.release_time_us <= current_time_us]
+        if due_hil:
+            hil_item = due_hil[-1]
+            self._px4_transport.send_hil_sensor(
+                hil_item.sample_time_us,
+                hil_item.accel_frd,
+                hil_item.gyro_frd,
+                hil_item.mag_frd,
+                hil_item.altitude_m,
+                diff_pressure_hpa=hil_item.diff_pressure_hpa,
+                temperature_celsius=hil_item.temperature_celsius,
+                fields_updated=hil_item.fields_updated,
+            )
+            self._pending_hil_sensor = [
+                item for item in self._pending_hil_sensor if item.release_time_us > current_time_us
+            ]
+            sensor_sent = True
+
+        due_vision = [item for item in self._pending_vision if item.release_time_us <= current_time_us]
+        if due_vision:
+            vision_item = due_vision[-1]
+            self._px4_transport.send_vision_position_estimate(
+                vision_item.sample_time_us,
+                vision_item.position_world_m,
+                vision_item.attitude_world_quat,
+            )
+            self._pending_vision = [item for item in self._pending_vision if item.release_time_us > current_time_us]
 
         return sensor_sent
 

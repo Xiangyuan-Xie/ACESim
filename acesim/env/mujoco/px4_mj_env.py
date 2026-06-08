@@ -33,7 +33,7 @@ class PX4MJEnv(MJEnv):
                 dynamic_hil_sensor_fields=False,
             )
             self._visual_stream_params = VehicleVisualStreamParams.from_asset_params(self._asset_params)
-            self._px4_actuator_params = PX4ActuatorParams()
+            self._px4_actuator_params = PX4ActuatorParams.from_asset_params(self._asset_params)
 
             self._px4_transport = PX4Transport(self._px4_actuator_params)
             self._visual_state_publisher = VehicleVisualStatePublisher(self._visual_stream_params)

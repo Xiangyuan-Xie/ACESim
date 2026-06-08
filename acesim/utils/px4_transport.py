@@ -15,16 +15,29 @@ import numpy as np
 from numpy.typing import NDArray
 from pymavlink import mavutil
 
+from acesim.utils.delay import parse_delay_range_ms
+
 FloatArray: TypeAlias = NDArray[np.float64]
 
 
 @dataclass(frozen=True)
 class PX4ActuatorParams:
-    """Actuator transport parameters.
+    """Actuator transport timing parameters."""
 
-    The simulator relies on ROS2/XRCE/PX4 middleware timing directly and does
-    not add any extra actuator execution delay of its own.
-    """
+    actuator_delay_ms: tuple[float, float] = (0.0, 0.0)
+
+    @classmethod
+    def from_asset_params(cls, asset_params: Mapping[str, Any]) -> "PX4ActuatorParams":
+        px4_fusion = asset_params.get("px4_fusion")
+        delay_config = px4_fusion.get("delay", {}) if isinstance(px4_fusion, Mapping) else {}
+        if not isinstance(delay_config, Mapping):
+            raise ValueError("px4_fusion.delay must be a table")
+        return cls(
+            actuator_delay_ms=parse_delay_range_ms(
+                delay_config.get("actuator_delay_ms", (0.0, 0.0)),
+                "actuator_delay_ms",
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -56,6 +69,8 @@ class PX4SensorParams:
     ekf2_eva_noise: float = 0.01
     ekf2_gps_ctrl: int = 0
     ekf2_mag_type: int = 0
+    hil_sensor_delay_ms: tuple[float, float] = (0.0, 0.0)
+    vision_delay_ms: tuple[float, float] = (0.0, 0.0)
 
     def __post_init__(self) -> None:
         if self.fusion_mode not in {"hil", "mocap"}:
@@ -72,6 +87,8 @@ class PX4SensorParams:
             raise ValueError("vision_rate_hz must be positive when vision streaming is enabled")
         if len(self.ekf2_ev_pos_body_m) != 3:
             raise ValueError("ekf2_ev_pos_body_m must contain exactly three values")
+        parse_delay_range_ms(self.hil_sensor_delay_ms, "hil_sensor_delay_ms")
+        parse_delay_range_ms(self.vision_delay_ms, "vision_delay_ms")
 
     @property
     def send_mag(self) -> bool:
@@ -127,8 +144,19 @@ class PX4SensorParams:
 
         mode = str(px4_fusion.get("mode", "hil"))
         mode_config = px4_fusion.get(mode, {})
+        delay_config = px4_fusion.get("delay", {})
         if not isinstance(mode_config, Mapping):
             raise ValueError(f"px4_fusion.{mode} must be a table")
+        if not isinstance(delay_config, Mapping):
+            raise ValueError("px4_fusion.delay must be a table")
+        hil_sensor_delay_ms = parse_delay_range_ms(
+            delay_config.get("hil_sensor_delay_ms", (0.0, 0.0)),
+            "hil_sensor_delay_ms",
+        )
+        vision_delay_ms = parse_delay_range_ms(
+            delay_config.get("vision_delay_ms", (0.0, 0.0)),
+            "vision_delay_ms",
+        )
 
         if mode == "hil":
             return cls(
@@ -140,6 +168,8 @@ class PX4SensorParams:
                 mag_rate_hz=float(mode_config.get("mag_rate_hz", 100.0)),
                 baro_rate_hz=float(mode_config.get("baro_rate_hz", 50.0)),
                 gps_rate_hz=float(mode_config.get("gps_rate_hz", 30.0)),
+                hil_sensor_delay_ms=hil_sensor_delay_ms,
+                vision_delay_ms=vision_delay_ms,
             )
         if mode == "mocap":
             ev_pos_body_m = cls._parse_vec3(
@@ -164,6 +194,8 @@ class PX4SensorParams:
                 ekf2_eva_noise=float(mode_config.get("ekf2_eva_noise", 0.01)),
                 ekf2_gps_ctrl=int(mode_config.get("ekf2_gps_ctrl", 0)),
                 ekf2_mag_type=int(mode_config.get("ekf2_mag_type", 0)),
+                hil_sensor_delay_ms=hil_sensor_delay_ms,
+                vision_delay_ms=vision_delay_ms,
             )
         raise ValueError(f"Unsupported px4_fusion mode: {mode}")
 
@@ -199,6 +231,7 @@ class PX4Transport:
         self._is_connected: bool = False
         self._is_armed: bool = False
         self._applied_actuator_controls: FloatArray | None = None
+        self._pending_actuator_controls: list[tuple[int, FloatArray]] = []
 
     @property
     def is_connected(self) -> bool:
@@ -220,6 +253,7 @@ class PX4Transport:
         """Reset the last applied command."""
 
         self._applied_actuator_controls = None
+        self._pending_actuator_controls.clear()
 
     def _read_latest_actuator_controls(self) -> Sequence[float] | None:
         """Drain queued HIL_ACTUATOR_CONTROLS frames and return the latest one.
@@ -246,9 +280,7 @@ class PX4Transport:
         return latest_controls
 
     def update_actuator_commands(self, sim_time_us: int, channel_count: int) -> bool:
-        """Drain the latest actuator frame and expose it immediately."""
-
-        del sim_time_us
+        """Drain the latest actuator frame and expose it once its release time arrives."""
 
         if channel_count <= 0:
             raise ValueError("channel_count must be positive")
@@ -264,7 +296,22 @@ class PX4Transport:
                 raise ValueError("HIL_ACTUATOR_CONTROLS contains non-finite values")
             applied = np.zeros(channel_count, dtype=float)
             applied[:channel_count] = normalized[:channel_count]
-            self._applied_actuator_controls = applied
+            delay_min_ms, delay_max_ms = self._actuator_params.actuator_delay_ms
+            if delay_max_ms <= 0.0:
+                self._applied_actuator_controls = applied
+                return True
+            delay_ms = (
+                delay_min_ms if delay_min_ms == delay_max_ms else float(np.random.uniform(delay_min_ms, delay_max_ms))
+            )
+            release_time_us = int(round(sim_time_us + delay_ms * 1000.0))
+            self._pending_actuator_controls.append((release_time_us, applied))
+
+        due_controls = [item for item in self._pending_actuator_controls if item[0] <= sim_time_us]
+        if due_controls:
+            self._applied_actuator_controls = due_controls[-1][1]
+            self._pending_actuator_controls = [
+                item for item in self._pending_actuator_controls if item[0] > sim_time_us
+            ]
             return True
         return False
 

@@ -32,6 +32,11 @@ ekf2_eva_noise = 0.01
 ekf2_gps_ctrl = 0
 ekf2_mag_type = 0
 
+[params.px4_fusion.delay]
+hil_sensor_delay_ms = [0.0, 0.0]
+vision_delay_ms = [0.0, 0.0]
+actuator_delay_ms = [0.0, 0.0]
+
 [params.visual_stream]
 enabled = true
 rate_hz = 120.0

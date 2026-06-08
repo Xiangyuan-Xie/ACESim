@@ -9,6 +9,11 @@ mag_rate_hz = 100.0
 baro_rate_hz = 50.0
 gps_rate_hz = 30.0
 
+[params.px4_fusion.delay]
+hil_sensor_delay_ms = [0.0, 0.0]
+vision_delay_ms = [0.0, 0.0]
+actuator_delay_ms = [0.0, 0.0]
+
 [params.visual_stream]
 enabled = true
 rate_hz = 120.0
