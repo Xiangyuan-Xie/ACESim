@@ -7,7 +7,6 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -147,18 +146,3 @@ def format_process_command_for_log(command: list[str]) -> str:
     if len(command) >= 5 and command[:2] == ["bash", "-lc"] and command[3] == "_":
         return command[4]
     return " ".join(shlex.quote(token) for token in command)
-
-
-def build_python_module_run_command(
-    package: str,
-    executable: str,
-    additional_env: Mapping[str, str] | None = None,
-    extra_args: list[str] | None = None,
-) -> str:
-    env = {"PYTHONUNBUFFERED": "1"}
-    if additional_env:
-        env.update(dict(additional_env))
-    exports = " ".join(f"{name}={shlex.quote(value)}" for name, value in sorted(env.items()))
-    args = " ".join(shlex.quote(arg) for arg in (extra_args or []))
-    suffix = f" {args}" if args else ""
-    return f"env {exports} ros2 run {shlex.quote(package)} {shlex.quote(executable)}{suffix}"

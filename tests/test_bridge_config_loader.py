@@ -74,6 +74,26 @@ class BridgeConfigLoaderTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unsupported bridge name: unknown_bridge"):
                 self.config_loader.load_bridge_configs(str(config_path))
 
+    def test_load_bridge_configs_rejects_legacy_handler_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "bridges.yaml"
+            config_path.write_text(
+                textwrap.dedent("""
+                    bridges:
+                      simulation_clock:
+                        enabled: true
+                        handler: simulation_clock
+                        transport:
+                          type: zmq_sub
+                          endpoint: tcp://127.0.0.1:5600
+                        topic: /acesim/clock
+                    """).strip() + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "must not define 'handler'"):
+                self.config_loader.load_bridge_configs(str(config_path))
+
 
 if __name__ == "__main__":
     unittest.main()

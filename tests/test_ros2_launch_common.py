@@ -319,6 +319,20 @@ class ROS2LaunchCommonTests(unittest.TestCase):
         self.assertEqual(len(bridge_processes), 1)
         self.assertIn("__node:=acesim_bridge", bridge_processes[0].cmd[4])
 
+    def test_default_ros_launch_stack_plan_keeps_full_ros_workflow(self) -> None:
+        plan = self.launch_common.build_ros_launch_stack_plan(
+            play_executable="acesim_play",
+            enable_px4_post_start_setup=True,
+            readiness_mode="background",
+        )
+
+        self.assertEqual(
+            tuple(component.value for component in plan.components),
+            ("microxrce", "px4", "ros2_bridge", "post_start_setup", "acesim_frontend"),
+        )
+        self.assertEqual(plan.readiness_mode, "background")
+        self.assertTrue(plan.uses_ros2)
+
     def test_build_px4_additional_env_keeps_required_launch_overrides(self) -> None:
         with patch.object(self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("x500_arm2x")):
             with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
@@ -405,6 +419,18 @@ class ROS2LaunchCommonTests(unittest.TestCase):
         command = self.launch_common.build_px4_post_start_command(hil_params)
 
         self.assertEqual(command[3:], ["hil", "0.0", "0.0", "0.0"])
+
+    def test_ros_launch_layer_owns_ros_module_command_construction(self) -> None:
+        command = self.launch_common.build_python_module_run_command(
+            "acesim_ros2",
+            "acesim_bridge",
+            {"ACESIM_BRIDGE_CONFIG": "/tmp/bridges.yaml"},
+            ["--ros-args", "-r", "__node:=acesim_bridge"],
+        )
+
+        self.assertIn("env ACESIM_BRIDGE_CONFIG=/tmp/bridges.yaml PYTHONUNBUFFERED=1", command)
+        self.assertIn("ros2 run acesim_ros2 acesim_bridge", command)
+        self.assertIn("--ros-args -r __node:=acesim_bridge", command)
 
     def test_graceful_shutdown_command_exits_zero_only_after_signal(self) -> None:
         command = self.launch_common.build_graceful_shutdown_command("MicroXRCEAgent udp4 -p 8888")
@@ -513,6 +539,20 @@ bridges:
         self.assertEqual(
             [bridge["endpoint"] for bridge in bridges],
             ["tcp://127.0.0.1:5600", "tcp://127.0.0.1:5603"],
+        )
+
+    def test_build_bridge_endpoint_overrides_rewrites_enabled_tcp_hosts(self) -> None:
+        overrides = self.launch_common.build_bridge_endpoint_overrides(
+            [
+                {"name": "simulation_clock", "enabled": True, "endpoint": "tcp://127.0.0.1:5600"},
+                {"name": "arm_state", "enabled": False, "endpoint": "tcp://127.0.0.1:5603"},
+            ],
+            "172.20.32.1",
+        )
+
+        self.assertEqual(
+            overrides,
+            {"overrides": {"simulation_clock": {"input_endpoint": "tcp://172.20.32.1:5600"}}},
         )
 
     def test_load_bridge_entries_rejects_invalid_tcp_endpoint(self) -> None:

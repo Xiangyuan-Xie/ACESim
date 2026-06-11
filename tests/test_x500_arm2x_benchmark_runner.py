@@ -10,7 +10,6 @@ from typing import Any, Iterable, Sequence, cast
 from unittest.mock import patch
 
 import pytest
-import zmq
 
 from acesim.benchmark.x500_arm2x_velocity import VelocityTrackingCommand, VelocityTrackingSummary
 from acesim.utils.math import calculate_coupled_gripper_positions
@@ -36,6 +35,22 @@ def _load_runner_module() -> Any:
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _fake_bridge_endpoint_overrides(
+    entries: list[dict[str, object]],
+    host: str,
+    endpoint_overrides: dict[str, str] | None = None,
+) -> dict[str, dict[str, dict[str, str]]]:
+    overrides: dict[str, dict[str, dict[str, str]]] = {"overrides": {}}
+    endpoint_overrides = endpoint_overrides or {}
+    for entry in entries:
+        if not bool(entry["enabled"]):
+            continue
+        bridge_name = str(entry["name"])
+        endpoint = endpoint_overrides.get(bridge_name, str(entry["endpoint"]))
+        overrides["overrides"][bridge_name] = {"input_endpoint": f"tcp://{host}:{endpoint.rsplit(':', 1)[1]}"}
+    return overrides
 
 
 def test_default_arm_pose_cases_are_named_and_joint_limited() -> None:
@@ -1247,6 +1262,7 @@ def test_managed_stack_headless_uses_arm_command_endpoint_not_fixed_pose(tmp_pat
         {"name": "arm_state", "enabled": True, "endpoint": "tcp://127.0.0.1:5603"},
     ]
     fake_launch_common.resolve_bridge_host = lambda _mode: "127.0.0.1"
+    fake_launch_common.build_bridge_endpoint_overrides = _fake_bridge_endpoint_overrides
     fake_launch_common.build_graceful_shutdown_command = lambda command, **_kwargs: ["bash", "-lc", command]
     fake_launch_common.build_python_module_run_command = (
         lambda package, executable, additional_env=None, extra_args=None: json.dumps(
@@ -1359,6 +1375,7 @@ def test_managed_stack_sets_px4_uxrce_port_env_to_match_agent(tmp_path: Path) ->
         {"name": "arm_state", "enabled": True, "endpoint": "tcp://127.0.0.1:5603"},
     ]
     fake_launch_common.resolve_bridge_host = lambda _mode: "127.0.0.1"
+    fake_launch_common.build_bridge_endpoint_overrides = _fake_bridge_endpoint_overrides
     fake_launch_common.build_graceful_shutdown_command = lambda command, **_kwargs: ["bash", "-lc", command]
     fake_launch_common.build_python_module_run_command = (
         lambda package, executable, additional_env=None, extra_args=None: json.dumps(
@@ -2087,7 +2104,7 @@ def test_arm_motion_command_sends_five_joint_pose_to_am_env() -> None:
 
     class FakeContext:
         def socket(self, socket_type: object) -> FakeSocket:
-            assert socket_type == zmq.REQ
+            assert socket_type == runner.zmq.REQ
             return FakeSocket()
 
     class FakeController:

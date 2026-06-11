@@ -1354,19 +1354,14 @@ class ManagedBenchmarkStack:
         bridge_overrides_path = Path(self._tmpdir.name) / "bridge_overrides.yaml"  # type: ignore[union-attr]
         bridge_entries = launch_common.load_bridge_entries(launch_common.bridge_config_path())
         bridge_host = launch_common.resolve_bridge_host(self._config.bridge_mode)  # type: ignore[arg-type]
-        overrides: dict[str, dict[str, dict[str, str]]] = {"overrides": {}}
-        for bridge in bridge_entries:
-            if not bool(bridge["enabled"]):
-                continue
-            bridge_name = str(bridge["name"])
-            if bridge_name == "simulation_clock":
-                endpoint = self._isolation.clock_zmq_endpoint
-            elif bridge_name == "arm_state":
-                endpoint = self._isolation.arm_state_zmq_endpoint
-            else:
-                endpoint = str(bridge["endpoint"])
-            port = endpoint.rsplit(":", 1)[1]
-            overrides["overrides"][bridge_name] = {"input_endpoint": f"tcp://{bridge_host}:{port}"}
+        overrides = launch_common.build_bridge_endpoint_overrides(
+            bridge_entries,
+            bridge_host,
+            {
+                "simulation_clock": self._isolation.clock_zmq_endpoint,
+                "arm_state": self._isolation.arm_state_zmq_endpoint,
+            },
+        )
         bridge_overrides_path.write_text(yaml.safe_dump(overrides, sort_keys=False), encoding="utf-8")
 
         common_env = {

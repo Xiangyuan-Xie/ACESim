@@ -25,6 +25,7 @@ from acesim.sitl.readiness import (
     run_strict_px4_readiness,
     wait_for_mavlink,
 )
+from acesim.sitl.stack_plan import StackPlan, build_core_sitl_stack_plan
 from acesim.utils.px4_transport import PX4SensorParams
 
 
@@ -71,6 +72,9 @@ class PX4SITLConfig:
 class PX4SITLRunner:
     def __init__(self, config: PX4SITLConfig) -> None:
         self._config = config
+
+    def stack_plan(self) -> StackPlan:
+        return build_core_sitl_stack_plan(headless=self._config.headless, readiness_mode=self._config.readiness_mode)
 
     def build_process_specs(self, px4_env: dict[str, str] | None = None) -> list[ProcessSpec]:
         px4_env = dict(px4_env or build_px4_env(self._config_loader()))

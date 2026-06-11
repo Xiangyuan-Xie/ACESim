@@ -6,13 +6,13 @@ from typing import Any
 import yaml
 from acesim_ros2.bridge.plugin_api import BridgeConfig, BridgeOverrideConfig, TransportConfig
 from acesim_ros2.bridge.registry import PLUGIN_REGISTRY
-from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
+from ament_index_python.packages import get_package_share_directory
 
 
 def default_bridge_config_path() -> str:
     try:
         return str(Path(get_package_share_directory("acesim_ros2")).resolve() / "config" / "bridges.yaml")
-    except PackageNotFoundError:
+    except Exception:
         return str(Path(__file__).resolve().parents[2] / "config" / "bridges.yaml")
 
 
@@ -45,6 +45,8 @@ def load_bridge_configs(config_file: str, overrides_file: str | None = None) -> 
     for bridge_name, raw_bridge in raw_bridges.items():
         if not isinstance(raw_bridge, dict):
             raise ValueError(f"Bridge '{bridge_name}' must be a mapping: {config_path}")
+        if "handler" in raw_bridge:
+            raise ValueError(f"Bridge '{bridge_name}' must not define 'handler'; the bridge name is the type")
         if not bool(raw_bridge.get("enabled", True)):
             continue
         if not isinstance(bridge_name, str) or bridge_name not in PLUGIN_REGISTRY:

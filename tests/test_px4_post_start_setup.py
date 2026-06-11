@@ -196,7 +196,7 @@ class PX4PostStartSetupTests(unittest.TestCase):
         self.assertFalse(hasattr(self.module, "PX4ReadinessNode"))
 
     def test_ros2_post_start_setup_is_thin_shim_to_core_readiness(self) -> None:
-        from acesim.sitl import readiness
+        import acesim.sitl.readiness as readiness
 
         module_name = "_test_acesim_ros2_px4_post_start_setup_shim"
         module_path = (

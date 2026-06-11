@@ -51,7 +51,7 @@ class _FakePX4SensorParams:
 
 class SITLCoreTests(unittest.TestCase):
     def test_build_px4_env_maps_assets_and_preserves_gz_suppression(self) -> None:
-        from acesim.sitl import build_px4_env
+        from acesim.sitl.px4_bootstrap import build_px4_env
 
         env = build_px4_env(
             cast(ConfigLoader, _FakeConfigLoader("advanced_plane", {"fusion_mode": "mocap"})),
@@ -66,14 +66,14 @@ class SITLCoreTests(unittest.TestCase):
         self.assertEqual(env["PX4_PARAM_SYS_HAS_GPS"], "0")
 
     def test_build_px4_make_command_exports_sorted_environment(self) -> None:
-        from acesim.sitl import build_px4_make_command
+        from acesim.sitl.px4_bootstrap import build_px4_make_command
 
         command = build_px4_make_command({"B": "two words", "A": "1"})
 
         self.assertEqual(command, "env A=1 B='two words' make px4_sitl none")
 
     def test_config_derives_instance_ports(self) -> None:
-        from acesim.sitl import PX4SITLConfig
+        from acesim.sitl.runner import PX4SITLConfig
 
         config = PX4SITLConfig(px4_repo=Path("/tmp/px4"), px4_instance=3)
 
@@ -84,13 +84,14 @@ class SITLCoreTests(unittest.TestCase):
         self.assertEqual(config.px4_mavlink_url, "udpin:0.0.0.0:14543")
 
     def test_config_rejects_instances_outside_px4_mavlink_mapping(self) -> None:
-        from acesim.sitl import PX4SITLConfig
+        from acesim.sitl.runner import PX4SITLConfig
 
         with self.assertRaisesRegex(ValueError, "px4_instance must be <= 9"):
             PX4SITLConfig(px4_repo=Path("/tmp/px4"), px4_instance=10)
 
     def test_runner_default_specs_are_pure_sitl(self) -> None:
-        from acesim.sitl import PX4SITLConfig, PX4SITLRunner
+        from acesim.sitl.runner import PX4SITLConfig, PX4SITLRunner
+        from acesim.sitl.stack_plan import StackComponent, build_core_sitl_stack_plan
 
         config = PX4SITLConfig(
             px4_repo=Path("/tmp/px4"),
@@ -98,10 +99,14 @@ class SITLCoreTests(unittest.TestCase):
             headless=True,
             readiness_mode="off",
         )
+        plan = build_core_sitl_stack_plan(headless=config.headless, readiness_mode=config.readiness_mode)
         specs = PX4SITLRunner(config).build_process_specs(
             px4_env={"PX4_SYS_AUTOSTART": "10016", "PX4_SIM_MODEL": "none"}
         )
 
+        self.assertEqual(plan.components, (StackComponent.ACESIM_FRONTEND, StackComponent.PX4))
+        self.assertEqual(plan.readiness_mode, "off")
+        self.assertFalse(plan.uses_ros2)
         self.assertEqual([spec.name for spec in specs], ["acesim", "px4"])
         self.assertEqual(specs[0].command[:3], [sys.executable, "-m", "acesim.sitl.play"])
         self.assertIn("--headless", specs[0].command)
@@ -109,8 +114,20 @@ class SITLCoreTests(unittest.TestCase):
         self.assertEqual(specs[1].cwd, Path("/tmp/px4"))
         self.assertNotIn("--ros2-bridge", " ".join(token for spec in specs for token in spec.command))
 
+    def test_runner_exposes_core_stack_plan(self) -> None:
+        from acesim.sitl.runner import PX4SITLConfig, PX4SITLRunner
+        from acesim.sitl.stack_plan import StackComponent
+
+        runner = PX4SITLRunner(PX4SITLConfig(px4_repo=Path("/tmp/px4"), readiness_mode="wait"))
+
+        plan = runner.stack_plan()
+
+        self.assertEqual(plan.components, (StackComponent.ACESIM_FRONTEND, StackComponent.PX4))
+        self.assertEqual(plan.readiness_mode, "wait")
+        self.assertFalse(plan.uses_ros2)
+
     def test_runner_uses_direct_px4_binary_for_nonzero_instance(self) -> None:
-        from acesim.sitl import PX4SITLConfig, PX4SITLRunner
+        from acesim.sitl.runner import PX4SITLConfig, PX4SITLRunner
 
         config = PX4SITLConfig(px4_repo=Path("/tmp/px4"), px4_instance=4, readiness_mode="off")
         specs = PX4SITLRunner(config).build_process_specs(px4_env={"PX4_SIM_MODEL": "none"})
@@ -149,8 +166,13 @@ class SITLCoreTests(unittest.TestCase):
         )
         self.assertNotIn("_cleanup_after_signal", format_process_command_for_log(command))
 
+    def test_process_supervisor_does_not_own_ros_command_construction(self) -> None:
+        import acesim.sitl.process as process
+
+        self.assertFalse(hasattr(process, "build_python_module_run_command"))
+
     def test_core_play_headless_loop_does_not_yield_after_each_step(self) -> None:
-        from acesim.sitl import play
+        import acesim.sitl.play as play
 
         calls: list[str] = []
 
@@ -176,7 +198,7 @@ class SITLCoreTests(unittest.TestCase):
         self.assertEqual(calls, ["step", "close"])
 
     def test_runner_does_not_start_px4_when_acesim_startup_fails(self) -> None:
-        from acesim.sitl import PX4SITLConfig, PX4SITLRunner
+        from acesim.sitl.runner import PX4SITLConfig, PX4SITLRunner
 
         started: list[str] = []
 
@@ -229,7 +251,7 @@ class SITLCoreTests(unittest.TestCase):
         self.assertEqual(started, ["acesim"])
 
     def test_runner_waits_for_acesim_ready_marker_before_starting_px4(self) -> None:
-        from acesim.sitl import PX4SITLConfig, PX4SITLRunner
+        from acesim.sitl.runner import PX4SITLConfig, PX4SITLRunner
 
         started: list[str] = []
         marker_checks: list[Path] = []
@@ -280,7 +302,7 @@ class SITLCoreTests(unittest.TestCase):
         self.assertEqual(started[:2], ["acesim", "px4"])
 
     def test_background_readiness_runs_non_destructive_diagnostics(self) -> None:
-        from acesim.sitl import PX4SITLConfig, PX4SITLRunner
+        from acesim.sitl.runner import PX4SITLConfig, PX4SITLRunner
 
         calls: list[str] = []
 
@@ -339,7 +361,7 @@ class SITLCoreTests(unittest.TestCase):
         self.assertEqual(calls, ["mavlink", "setup", "background"])
 
     def test_wait_readiness_runs_strict_armability_path(self) -> None:
-        from acesim.sitl import PX4SITLConfig, PX4SITLRunner
+        from acesim.sitl.runner import PX4SITLConfig, PX4SITLRunner
 
         calls: list[str] = []
 
@@ -406,7 +428,7 @@ class SITLCoreTests(unittest.TestCase):
         self.assertEqual(config_from_args(args).readiness_mode, "wait")
 
     def test_mocap_required_setup_runs_without_armability_verification(self) -> None:
-        from acesim.sitl import readiness
+        import acesim.sitl.readiness as readiness
 
         calls: list[str] = []
         mav = object()
@@ -424,7 +446,7 @@ class SITLCoreTests(unittest.TestCase):
         armability.assert_not_called()
 
     def test_non_mocap_required_setup_skips_ekf_origin(self) -> None:
-        from acesim.sitl import readiness
+        import acesim.sitl.readiness as readiness
 
         with patch.object(readiness, "request_readiness_streams") as streams:
             with patch.object(readiness, "send_ekf_origin") as origin:
@@ -434,7 +456,7 @@ class SITLCoreTests(unittest.TestCase):
         origin.assert_not_called()
 
     def test_background_diagnostics_do_not_verify_armability(self) -> None:
-        from acesim.sitl import readiness
+        import acesim.sitl.readiness as readiness
 
         with patch.object(readiness, "wait_for_estimator_ready_quietly") as estimator:
             with patch.object(readiness, "wait_for_mocap_armability") as armability:
@@ -444,7 +466,7 @@ class SITLCoreTests(unittest.TestCase):
         armability.assert_not_called()
 
     def test_background_diagnostics_does_not_print_transient_readiness_waits(self) -> None:
-        from acesim.sitl import readiness
+        import acesim.sitl.readiness as readiness
 
         class _NeverReadyMav:
             def recv_match(self, **_kwargs):

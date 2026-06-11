@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Mapping, Optional
 
 if __package__ in (None, ""):
     package_parent = Path(__file__).resolve().parents[1]
@@ -13,7 +14,7 @@ if __package__ in (None, ""):
         sys.path.insert(0, str(package_parent))
 
 import yaml
-from acesim_ros2.bridge.registry import PLUGIN_REGISTRY
+from acesim_ros2.bridge.config import load_bridge_configs
 from ament_index_python.packages import get_package_share_directory
 from launch.actions import EmitEvent, ExecuteProcess, RegisterEventHandler, TimerAction
 from launch.event_handlers import OnProcessExit, OnProcessStart
@@ -22,13 +23,14 @@ from launch_ros.actions import Node
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.sitl.process import build_graceful_shutdown_command
-from acesim.sitl.process import build_python_module_run_command as core_build_python_module_run_command
 from acesim.sitl.px4_bootstrap import build_px4_env as core_build_px4_env
 from acesim.sitl.px4_bootstrap import (
     build_px4_make_command,
 )
 from acesim.sitl.px4_bootstrap import load_px4_repo_path as core_load_px4_repo_path
 from acesim.sitl.px4_bootstrap import resolve_px4_startup_env as core_resolve_px4_startup_env
+from acesim.sitl.stack_plan import StackPlan
+from acesim.sitl.stack_plan import build_ros_launch_stack_plan as core_build_ros_launch_stack_plan
 from acesim.utils.px4_transport import PX4SensorParams
 
 _TCP_ENDPOINT_PATTERN = re.compile(r"^tcp://(?P<host>[^:/]+):(?P<port>\d+)$")
@@ -73,50 +75,40 @@ def bridge_config_path() -> str:
 
 
 def load_bridge_entries(config_file: str) -> list[dict[str, object]]:
-    config_path = Path(config_file)
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    if not isinstance(config, dict):
-        raise ValueError(f"Bridge config must be a mapping: {config_path}")
-
-    bridges = config.get("bridges")
-    if not isinstance(bridges, dict):
-        raise ValueError(f"Bridge config must define a mapping under 'bridges': {config_path}")
-
     validated: list[dict[str, object]] = []
-    seen_ids: set[str] = set()
-    for bridge_name, bridge in bridges.items():
-        if not isinstance(bridge_name, str) or not bridge_name:
-            raise ValueError(f"Each bridge entry must use a non-empty string name: {config_path}")
-        if not isinstance(bridge, dict):
-            raise ValueError(f"Bridge '{bridge_name}' must be a mapping: {config_path}")
-        if bridge_name in seen_ids:
-            raise ValueError(f"Duplicate bridge name: {bridge_name}")
-        seen_ids.add(bridge_name)
-        if bridge_name not in PLUGIN_REGISTRY:
-            supported = ", ".join(PLUGIN_REGISTRY)
-            raise ValueError(f"Unsupported bridge name: {bridge_name}. Supported bridges: {supported}")
-        if "handler" in bridge:
-            raise ValueError(f"Bridge '{bridge_name}' must not define 'handler'; the bridge name is the type")
-
-        transport = bridge.get("transport")
-        if not isinstance(transport, dict):
-            raise ValueError(f"Bridge '{bridge_name}' must define a transport mapping")
-
-        endpoint = transport.get("endpoint")
-        if not isinstance(endpoint, str) or not endpoint:
-            raise ValueError(f"Bridge '{bridge_name}' transport must define a non-empty endpoint")
+    for bridge in load_bridge_configs(config_file):
+        endpoint = bridge.transport.endpoint
         if _TCP_ENDPOINT_PATTERN.fullmatch(endpoint) is None:
-            raise ValueError(f"Bridge '{bridge_name}' endpoint must use tcp://host:port format")
+            raise ValueError(f"Bridge '{bridge.name}' endpoint must use tcp://host:port format")
 
         validated.append(
             {
-                "name": bridge_name,
-                "enabled": bool(bridge.get("enabled", True)),
+                "name": bridge.name,
+                "enabled": bridge.enabled,
                 "endpoint": endpoint,
             }
         )
 
     return validated
+
+
+def build_bridge_endpoint_overrides(
+    bridge_entries: list[dict[str, object]],
+    bridge_host: str,
+    endpoint_overrides: Mapping[str, str] | None = None,
+) -> dict[str, dict[str, dict[str, str]]]:
+    endpoint_overrides = endpoint_overrides or {}
+    overrides: dict[str, dict[str, dict[str, str]]] = {"overrides": {}}
+    for bridge in bridge_entries:
+        if not bool(bridge["enabled"]):
+            continue
+        bridge_name = str(bridge["name"])
+        endpoint = endpoint_overrides.get(bridge_name, str(bridge["endpoint"]))
+        endpoint_match = _TCP_ENDPOINT_PATTERN.fullmatch(endpoint)
+        if endpoint_match is None:
+            raise ValueError(f"Invalid TCP endpoint: {endpoint}")
+        overrides["overrides"][bridge_name] = {"input_endpoint": f"tcp://{bridge_host}:{endpoint_match.group('port')}"}
+    return overrides
 
 
 def resolve_bridge_host(bridge_mode: Literal["linux", "wsl"]) -> str:
@@ -135,6 +127,19 @@ def resolve_bridge_host(bridge_mode: Literal["linux", "wsl"]) -> str:
         if len(parts) >= 2:
             return parts[1]
     return "127.0.0.1"
+
+
+def build_ros_launch_stack_plan(
+    *,
+    play_executable: Optional[str],
+    enable_px4_post_start_setup: bool,
+    readiness_mode: Literal["background", "wait", "off"],
+) -> StackPlan:
+    return core_build_ros_launch_stack_plan(
+        play_executable=play_executable,
+        enable_px4_post_start_setup=enable_px4_post_start_setup,
+        readiness_mode=readiness_mode,
+    )
 
 
 def build_px4_post_start_command(sensor_params: PX4SensorParams) -> list[str]:
@@ -171,10 +176,16 @@ def python_launch_kwargs(*, additional_env: Optional[dict[str, str]] = None) -> 
 def build_python_module_run_command(
     package: str,
     executable: str,
-    additional_env: Optional[dict[str, str]] = None,
+    additional_env: Mapping[str, str] | None = None,
     extra_args: Optional[list[str]] = None,
 ) -> str:
-    return core_build_python_module_run_command(package, executable, additional_env, extra_args)
+    env = {"PYTHONUNBUFFERED": "1"}
+    if additional_env:
+        env.update(dict(additional_env))
+    exports = " ".join(f"{name}={shlex.quote(value)}" for name, value in sorted(env.items()))
+    args = " ".join(shlex.quote(arg) for arg in (extra_args or []))
+    suffix = f" {args}" if args else ""
+    return f"env {exports} ros2 run {shlex.quote(package)} {shlex.quote(executable)}{suffix}"
 
 
 def build_px4_post_start_setup_process(additional_env: Optional[dict[str, str]] = None) -> ExecuteProcess:
@@ -222,16 +233,7 @@ def build_launch_entities(
     config_file = bridge_config_path()
     bridge_entries = load_bridge_entries(config_file)
     bridge_host = resolve_bridge_host(bridge_mode)
-    overrides: dict[str, dict[str, dict[str, str]]] = {"overrides": {}}
-    for bridge in bridge_entries:
-        if not bool(bridge["enabled"]):
-            continue
-        endpoint_match = _TCP_ENDPOINT_PATTERN.fullmatch(str(bridge["endpoint"]))
-        if endpoint_match is None:
-            raise ValueError(f"Invalid TCP endpoint: {bridge['endpoint']}")
-        overrides["overrides"][str(bridge["name"])] = {
-            "input_endpoint": f"tcp://{bridge_host}:{endpoint_match.group('port')}"
-        }
+    overrides = build_bridge_endpoint_overrides(bridge_entries, bridge_host)
     handle = tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
