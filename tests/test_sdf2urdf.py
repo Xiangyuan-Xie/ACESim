@@ -10,7 +10,11 @@ from acesim.tools.sdf2urdf import (
     SDFModelTruth,
     generate_manual_meshes_from_sdf,
 )
+from acesim.tools.sdf2urdf import xml_formatting as sdf_xml_formatting
 from acesim.tools.sdf2urdf.providers import PX4_PROVIDER
+from acesim.tools.urdf2mjcf import xml_ops as urdf_xml_ops
+from acesim.tools.urdf2mjcf.asset_context import AssetPaths as URDF2MJCFAssetPaths
+from acesim.tools.urdf2mjcf.asset_context import AssetToolchainConfig as URDF2MJCFAssetToolchainConfig
 
 
 class SDF2URDFTests(unittest.TestCase):
@@ -20,6 +24,15 @@ class SDF2URDFTests(unittest.TestCase):
 
         self.assertTrue(paths.urdf_path.name.endswith(".urdf"))
         self.assertEqual(config.target, "advanced_plane")
+
+    def test_asset_tool_context_is_shared_with_urdf2mjcf(self) -> None:
+        self.assertIs(AssetPaths, URDF2MJCFAssetPaths)
+        self.assertIs(AssetToolchainConfig, URDF2MJCFAssetToolchainConfig)
+
+    def test_xml_formatting_helpers_are_shared_with_urdf2mjcf(self) -> None:
+        self.assertIs(sdf_xml_formatting.ATTRIB_ORDER, urdf_xml_ops.ATTRIB_ORDER)
+        self.assertIs(sdf_xml_formatting.indent_xml, urdf_xml_ops.indent_xml)
+        self.assertIs(sdf_xml_formatting.sort_attributes, urdf_xml_ops.sort_attributes)
 
     def test_import_does_not_pull_in_urdf2mjcf_package(self) -> None:
         result = subprocess.run(

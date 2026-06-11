@@ -16,7 +16,7 @@ class ServoData:
 
 
 def kgcm_to_Nm(kgcm: float) -> float:
-    """Convert torque from kg·cm to N·m."""
+    """Convert torque from kg*cm to N*m."""
     return kgcm * 0.0980665
 
 
@@ -117,37 +117,42 @@ def estimate(servo: ServoData):
 #     kt_kgcm_per_a=12.5,
 # )
 
-# Model 3915
-servo = ServoData(
-    no_load_time_sec_per_60deg=0.1,
-    no_load_current_a=0.26,
-    stall_torque_kgcm=14.2,
-    stall_current_a=1.5,
-    rated_load_kgcm=4.5,
-    rated_current_a=0.5,
-    kt_kgcm_per_a=9.3,
-)
 
-results = estimate(servo)
+def main() -> None:
+    # Model 3915
+    servo = ServoData(
+        no_load_time_sec_per_60deg=0.1,
+        no_load_current_a=0.26,
+        stall_torque_kgcm=14.2,
+        stall_current_a=1.5,
+        rated_load_kgcm=4.5,
+        rated_current_a=0.5,
+        kt_kgcm_per_a=9.3,
+    )
 
-# Print results
-print("=== Servo Physical Parameter Estimation ===")
-print("\n--- Torque Constant (Kt) Verification ---")
-print(f"1. Provided Kt: {results['kt_provided_kgcm_per_a']:.2f} kg·cm/A")
-print(
-    f"2. Stall-derived Kt: {results['kt_from_stall_kgcm_per_a']:.2f} kg·cm/A "
-    f"(Error: {results['kt_stall_error_percent']:.1f}%)"
-)
-print(
-    f"3. Rated-derived Kt: {results['kt_from_rated_kgcm_per_a']:.2f} kg·cm/A "
-    f"(Error: {results['kt_rated_error_percent']:.1f}%)"
-)
-print(f"4. Recommended Kt: {results['kt_recommended_kgcm_per_a']:.2f} kg·cm/A")
+    results = estimate(servo)
 
-if results["kt_consistency_warning"]:
-    print(f"\n⚠️  {results['kt_consistency_warning']}")
+    print("=== Servo Physical Parameter Estimation ===")
+    print("\n--- Torque Constant (Kt) Verification ---")
+    print(f"1. Provided Kt: {results['kt_provided_kgcm_per_a']:.2f} kg*cm/A")
+    print(
+        f"2. Stall-derived Kt: {results['kt_from_stall_kgcm_per_a']:.2f} kg*cm/A "
+        f"(Error: {results['kt_stall_error_percent']:.1f}%)"
+    )
+    print(
+        f"3. Rated-derived Kt: {results['kt_from_rated_kgcm_per_a']:.2f} kg*cm/A "
+        f"(Error: {results['kt_rated_error_percent']:.1f}%)"
+    )
+    print(f"4. Recommended Kt: {results['kt_recommended_kgcm_per_a']:.2f} kg*cm/A")
 
-print("\n--- Dynamics Parameters ---")
-print(f"1. Viscous Damping: {results['damping_Nm_s_rad']:.6f} N·m·s/rad")
-print(f"2. Coulomb Friction: {results['friction_Nm']:.6f} N·m")
-print(f"3. Friction to Rated Load Ratio: {results['friction_vs_rated_ratio'] * 100:.1f}%")
+    if results["kt_consistency_warning"]:
+        print(f"\nWARNING: {results['kt_consistency_warning']}")
+
+    print("\n--- Dynamics Parameters ---")
+    print(f"1. Viscous Damping: {results['damping_Nm_s_rad']:.6f} N*m*s/rad")
+    print(f"2. Coulomb Friction: {results['friction_Nm']:.6f} N*m")
+    print(f"3. Friction to Rated Load Ratio: {results['friction_vs_rated_ratio'] * 100:.1f}%")
+
+
+if __name__ == "__main__":
+    main()

@@ -85,3 +85,28 @@ def test_acesim_ros2_installs_launch_and_config_globs() -> None:
 
     assert 'glob("config/*.yaml")' in setup_text
     assert 'glob("launch/*.launch.py")' in setup_text
+
+
+def test_acesim_ros2_does_not_keep_unused_px4_sim_config() -> None:
+    config_path = ROOT / "acesim/deploy/aircraft/acesim_ros2/config/px4_sim_config.yaml"
+
+    assert not config_path.exists()
+
+
+def test_acesim_core_does_not_keep_broken_benchmark_entrypoint() -> None:
+    benchmark_path = ROOT / "acesim/core/benchmark.py"
+
+    assert not benchmark_path.exists()
+
+
+def test_dynamic_params_tool_is_import_safe() -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", "import acesim.tools.cal_dynamic_params"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""

@@ -1,52 +1,14 @@
 import xml.etree.ElementTree as ET
 
-ATTRIB_ORDER = [
-    "name",
-    "class",
-    "type",
-    "mesh",
-    "material",
-    "size",
-    "pos",
-    "quat",
-    "axis",
-    "fromto",
-    "mass",
-    "density",
-    "rgba",
-    "group",
-    "contype",
-    "conaffinity",
-    "condim",
-    "kp",
-    "kv",
-    "gear",
-    "joint",
-    "site",
-    "objtype",
-    "objname",
-    "forcerange",
-    "ctrlrange",
-    "ctrllimited",
-    "forcelimited",
+from acesim.tools.utils.xml_formatting import ATTRIB_ORDER, indent_xml, sort_attributes
+
+__all__ = [
+    "ATTRIB_ORDER",
+    "add_collision_exclusions",
+    "indent_xml",
+    "inject_xml",
+    "sort_attributes",
 ]
-
-
-def indent_xml(elem: ET.Element, level: int = 0) -> None:
-    i = "\n" + level * "  "
-    if len(elem):
-        if not elem.text or not elem.text.strip():
-            elem.text = i + "  "
-        if not elem.tail or not elem.tail.strip():
-            elem.tail = i
-        for child in elem:
-            indent_xml(child, level + 1)
-        if not child.tail or not child.tail.strip():
-            child.tail = i
-        if not elem.tail or not elem.tail.strip():
-            elem.tail = i
-    elif level and (not elem.tail or not elem.tail.strip()):
-        elem.tail = i
 
 
 def inject_xml(parent: ET.Element, xml_content: str, index: int = -1, *, source: str = "xml fragment") -> None:
@@ -60,22 +22,6 @@ def inject_xml(parent: ET.Element, xml_content: str, index: int = -1, *, source:
         else:
             parent.insert(index, child)
             index += 1
-
-
-def sort_attributes(elem: ET.Element) -> None:
-    if elem.attrib:
-        sorted_attrib: dict[str, str] = {}
-        for key in ATTRIB_ORDER:
-            if key in elem.attrib:
-                sorted_attrib[key] = elem.attrib[key]
-        for key, value in elem.attrib.items():
-            if key not in sorted_attrib:
-                sorted_attrib[key] = value
-        elem.attrib.clear()
-        elem.attrib.update(sorted_attrib)
-
-    for child in elem:
-        sort_attributes(child)
 
 
 def add_collision_exclusions(root: ET.Element) -> None:
