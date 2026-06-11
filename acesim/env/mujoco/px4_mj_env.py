@@ -40,6 +40,7 @@ class PX4MJEnv(MJEnv):
             self._visual_publish_period_us = int(round(1_000_000.0 / self._visual_stream_params.rate_hz))
             self._next_visual_publish_time_us = 0
             self._px4_connection_polled_this_step = False
+            self._px4_armed_cached = False
             self._interactive_viewer_mode = False
             self._initialize_px4_base_handles()
             self._initialize_vehicle_handles()
@@ -471,6 +472,7 @@ class PX4MJEnv(MJEnv):
                 self._sensor_scheduler.update()
             self._update_px4_controls()
             self._apply_vehicle_physics()
+            self._px4_armed_cached = self._px4_transport.update_arming_state()
         self._update_custom_control()
         self._update_vehicle_visuals()
         if self._interactive_viewer_mode:

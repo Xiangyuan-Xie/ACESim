@@ -287,3 +287,37 @@ def idle_visual_speed_target(
     blend_weight = float(np.clip(1.0 - physical_speed / low_speed_blend_end, 0.0, 1.0))
     low_speed_target = blend_weight * idle_speed + (1.0 - blend_weight) * physical_speed
     return max(physical_speed, float(low_speed_target))
+
+
+def rotor_thrust_moment_along_axis(
+    *,
+    omega_radps: float,
+    axis: np.ndarray,
+    spin_direction: float,
+    motor_constant: float,
+    moment_constant: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    thrust_scalar = abs(float(motor_constant) * float(omega_radps) * abs(float(omega_radps)))
+    axis_arr = np.asarray(axis, dtype=float)
+    return axis_arr * thrust_scalar, -float(spin_direction) * thrust_scalar * float(moment_constant) * axis_arr
+
+
+def thruster_wrenches_from_speed(
+    *,
+    omega_radps: np.ndarray,
+    axes_b: np.ndarray,
+    motor_constant: np.ndarray,
+    moment_constant: np.ndarray,
+    rotor_direction: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    omega = np.asarray(omega_radps, dtype=float)
+    axes = np.asarray(axes_b, dtype=float)
+    thrust_scalar = omega * np.abs(omega) * np.asarray(motor_constant, dtype=float)
+    force_b = axes * thrust_scalar[:, None]
+    moment_b = (
+        -np.asarray(rotor_direction, dtype=float)[:, None]
+        * thrust_scalar[:, None]
+        * np.asarray(moment_constant, dtype=float)[:, None]
+        * axes
+    )
+    return force_b, moment_b

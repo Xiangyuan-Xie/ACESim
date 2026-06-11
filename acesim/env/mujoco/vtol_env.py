@@ -224,7 +224,7 @@ class VTOLEnv(FWEnv):
 
     def _update_vehicle_visuals(self) -> None:
         super()._update_vehicle_visuals()
-        armed = self._px4_transport.update_arming_state()
+        armed = self._px4_armed_cached
         dt_s = self._mj_model.opt.timestep
         for i, mocap_id in enumerate(self._lift_rotor_mocap_ids):
             if mocap_id < 0:

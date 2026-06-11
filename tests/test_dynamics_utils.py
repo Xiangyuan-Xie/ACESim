@@ -11,6 +11,8 @@ from acesim.utils.dynamics import (
     RotorInertialTorqueParams,
     first_order_response_step,
     idle_visual_speed_target,
+    rotor_thrust_moment_along_axis,
+    thruster_wrenches_from_speed,
 )
 
 
@@ -240,6 +242,42 @@ class DynamicsUtilsTests(unittest.TestCase):
                 low_speed_blend_end=400.0,
             ),
             500.0,
+        )
+
+    def test_rotor_thrust_moment_formula_uses_axis_and_spin_direction(self) -> None:
+        axis = np.array([0.0, 0.0, 1.0], dtype=float)
+
+        thrust, moment = rotor_thrust_moment_along_axis(
+            omega_radps=-4.0,
+            axis=axis,
+            spin_direction=-1.0,
+            motor_constant=0.5,
+            moment_constant=0.2,
+        )
+
+        np.testing.assert_allclose(thrust, np.array([0.0, 0.0, 8.0], dtype=float))
+        np.testing.assert_allclose(moment, np.array([0.0, 0.0, 1.6], dtype=float))
+
+    def test_thruster_wrenches_from_speed_vectorizes_body_frame_formula(self) -> None:
+        axes_b = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0]], dtype=float)
+        omega = np.array([3.0, -2.0], dtype=float)
+        motor_constant = np.array([0.5, 2.0], dtype=float)
+        moment_constant = np.array([0.1, 0.25], dtype=float)
+        rotor_direction = np.array([1.0, -1.0], dtype=float)
+
+        force_b, moment_b = thruster_wrenches_from_speed(
+            omega_radps=omega,
+            axes_b=axes_b,
+            motor_constant=motor_constant,
+            moment_constant=moment_constant,
+            rotor_direction=rotor_direction,
+        )
+
+        expected_scalar = omega * np.abs(omega) * motor_constant
+        np.testing.assert_allclose(force_b, axes_b * expected_scalar[:, None])
+        np.testing.assert_allclose(
+            moment_b,
+            -rotor_direction[:, None] * expected_scalar[:, None] * moment_constant[:, None] * axes_b,
         )
 
 

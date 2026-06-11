@@ -10,6 +10,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 compatibility
     import tomli as tomllib
 
+from acesim.config.asset_params import get_optional_table, resolve_vehicle_params_table
 from acesim.config.config_loader import ConfigLoader
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,3 +57,20 @@ class ConfigLoaderTests(unittest.TestCase):
         params = config["params"]
         self.assertNotIn("air_density", params["downwash"])
         self.assertNotIn("body_aero_drag", params)
+
+    def test_shared_asset_params_helper_reads_optional_tables(self) -> None:
+        params = {"visual_stream": {"enabled": True}}
+
+        self.assertEqual(get_optional_table(params, "visual_stream"), {"enabled": True})
+        self.assertEqual(get_optional_table(params, "missing"), {})
+
+        with self.assertRaisesRegex(ValueError, "visual_stream must be a table"):
+            get_optional_table({"visual_stream": 1}, "visual_stream")
+
+    def test_vehicle_params_table_rejects_flat_and_nested_conflicts(self) -> None:
+        with self.assertRaisesRegex(ValueError, "params.mc conflicts with legacy flat params"):
+            resolve_vehicle_params_table(
+                {"mc": {"motor_constant": 1.0}, "motor_constant": 1.0},
+                "mc",
+                legacy_keys=("motor_constant",),
+            )

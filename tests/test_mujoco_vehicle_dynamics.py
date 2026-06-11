@@ -65,6 +65,16 @@ class _ConnectedFakePX4Transport(_FakePX4Transport):
         return self.has_new_controls
 
 
+class _ArmingCountingPX4Transport(_ConnectedFakePX4Transport):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.arming_polls = 0
+
+    def update_arming_state(self) -> bool:
+        self.arming_polls += 1
+        return True
+
+
 class _ConnectsOnPostStepFakePX4Transport(_FakePX4Transport):
     events: list[str] = []
 
@@ -362,6 +372,19 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 env._control(env._mj_model, env._mj_data)
 
             self.assertEqual(update_mock.call_count, 3)
+        finally:
+            env.close()
+
+    def test_vtol_visual_update_polls_px4_arming_state_once_per_control_callback(self) -> None:
+        with patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _ArmingCountingPX4Transport):
+            env = VTOLEnv(ConfigLoader(_config_path("standard_vtol")))
+        try:
+            transport = cast(_ArmingCountingPX4Transport, env._px4_transport)
+            transport.arming_polls = 0
+
+            env._control(env._mj_model, env._mj_data)
+
+            self.assertEqual(transport.arming_polls, 1)
         finally:
             env.close()
 

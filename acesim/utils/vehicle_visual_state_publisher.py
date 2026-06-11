@@ -15,6 +15,8 @@ from typing import Mapping
 import numpy as np
 import zmq
 
+from acesim.config.asset_params import get_optional_table
+
 
 @dataclass(frozen=True)
 class VehicleVisualStreamParams:
@@ -30,9 +32,7 @@ class VehicleVisualStreamParams:
 
     @classmethod
     def from_asset_params(cls, asset_params: Mapping[str, object]) -> "VehicleVisualStreamParams":
-        config = asset_params.get("visual_stream", {})
-        if not isinstance(config, Mapping):
-            return cls()
+        config = get_optional_table(asset_params, "visual_stream")
         return cls(
             enabled=bool(config.get("enabled", False)),
             rate_hz=float(config.get("rate_hz", 120.0)),

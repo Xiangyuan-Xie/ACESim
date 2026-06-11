@@ -18,6 +18,7 @@ from acesim.utils.dynamics import (
     RotorFlowParams,
     RotorInertialTorqueParams,
     first_order_response_step,
+    rotor_thrust_moment_along_axis,
 )
 
 _GROUND_EFFECT_SUPPORT_GEOM_GROUP = 2
@@ -282,22 +283,29 @@ class MCEnv(PX4MJEnv):
             omega_abs = abs(omega)
             direction = self._rotor_direction[i]
 
-            thrust = abs(self._params.motor_constant * omega * omega_abs)
-            thrust *= self._compute_rotor_flow_thrust_scale(
+            thrust_force_r, torque_axis_r = rotor_thrust_moment_along_axis(
+                omega_radps=omega,
+                axis=rotor_axis_r,
+                spin_direction=direction,
+                motor_constant=self._params.motor_constant,
+                moment_constant=self._params.moment_constant,
+            )
+            base_thrust = float(np.linalg.norm(thrust_force_r))
+            flow_scale = self._compute_rotor_flow_thrust_scale(
                 pos_w=pos_w,
                 rotor_axis_w=rotor_axis_w,
                 omega_abs=omega_abs,
                 v_axial=v_axial,
                 v_perp_r=v_perp_r,
             )
+            thrust = base_thrust * flow_scale
             rotor_thrusts[i] = thrust
 
-            torque_axis_r = -direction * thrust * self._params.moment_constant * rotor_axis_r
             f_drag_r = -self._params.rotor_drag_coeff * omega_abs * v_perp_r
             m_rolling_r = -self._params.rolling_moment_coeff * omega_abs * direction * v_perp_r
 
-            rotor_force_w[i] = rb_mat @ (rotor_axis_r * thrust + f_drag_r)
-            rotor_moment_w[i] = rb_mat @ (torque_axis_r + m_rolling_r)
+            rotor_force_w[i] = rb_mat @ (thrust_force_r * flow_scale + f_drag_r)
+            rotor_moment_w[i] = rb_mat @ (torque_axis_r * flow_scale + m_rolling_r)
 
         return rotor_positions_w, rotor_axes_w, rotor_thrusts, rotor_force_w, rotor_moment_w
 
@@ -753,7 +761,7 @@ class MCEnv(PX4MJEnv):
         self._apply_lumped_drag_wrench(base_pos, rb_mat, rb_inv_mat, v_com_w)
 
     def _update_vehicle_visuals(self) -> None:
-        armed = self._px4_transport.update_arming_state()
+        armed = self._px4_armed_cached
         if armed:
             physical_speeds = np.maximum(0.0, self._rotor_angular_velocity)
             target_visual_speeds = self._target_visual_speeds

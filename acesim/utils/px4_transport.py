@@ -15,6 +15,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pymavlink import mavutil
 
+from acesim.config.asset_params import get_optional_table
 from acesim.utils.delay import parse_delay_range_ms
 
 FloatArray: TypeAlias = NDArray[np.float64]
@@ -28,10 +29,8 @@ class PX4ActuatorParams:
 
     @classmethod
     def from_asset_params(cls, asset_params: Mapping[str, Any]) -> "PX4ActuatorParams":
-        px4_fusion = asset_params.get("px4_fusion")
-        delay_config = px4_fusion.get("delay", {}) if isinstance(px4_fusion, Mapping) else {}
-        if not isinstance(delay_config, Mapping):
-            raise ValueError("px4_fusion.delay must be a table")
+        px4_fusion = get_optional_table(asset_params, "px4_fusion")
+        delay_config = get_optional_table(px4_fusion, "delay")
         return cls(
             actuator_delay_ms=parse_delay_range_ms(
                 delay_config.get("actuator_delay_ms", (0.0, 0.0)),
@@ -143,12 +142,8 @@ class PX4SensorParams:
             )
 
         mode = str(px4_fusion.get("mode", "hil"))
-        mode_config = px4_fusion.get(mode, {})
-        delay_config = px4_fusion.get("delay", {})
-        if not isinstance(mode_config, Mapping):
-            raise ValueError(f"px4_fusion.{mode} must be a table")
-        if not isinstance(delay_config, Mapping):
-            raise ValueError("px4_fusion.delay must be a table")
+        mode_config = get_optional_table(px4_fusion, mode)
+        delay_config = get_optional_table(px4_fusion, "delay")
         hil_sensor_delay_ms = parse_delay_range_ms(
             delay_config.get("hil_sensor_delay_ms", (0.0, 0.0)),
             "hil_sensor_delay_ms",

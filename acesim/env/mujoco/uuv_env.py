@@ -9,7 +9,7 @@ from scipy.spatial.transform import Rotation
 
 from acesim.config.config_loader import ConfigLoader
 from acesim.env.mujoco.px4_mj_env import PX4MJEnv
-from acesim.utils.dynamics import first_order_response_step, idle_visual_speed_target
+from acesim.utils.dynamics import first_order_response_step, idle_visual_speed_target, thruster_wrenches_from_speed
 
 
 @dataclass
@@ -149,13 +149,12 @@ class UUVEnv(PX4MJEnv):
         body_velocity_flu: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         rb_mat = rb.as_matrix()
-        force_scalar = self._rotor_angular_velocity * np.abs(self._rotor_angular_velocity) * self._params.motor_constant
-        force_b = self._rotor_axes_b * force_scalar[:, None]
-        torque_b = (
-            -self._params.rotor_direction[:, None]
-            * force_scalar[:, None]
-            * self._params.moment_constant[:, None]
-            * self._rotor_axes_b
+        force_b, torque_b = thruster_wrenches_from_speed(
+            omega_radps=self._rotor_angular_velocity,
+            axes_b=self._rotor_axes_b,
+            motor_constant=self._params.motor_constant,
+            moment_constant=self._params.moment_constant,
+            rotor_direction=self._params.rotor_direction,
         )
         return (
             base_pos + self._rotor_offsets @ rb_mat.T,
@@ -190,7 +189,7 @@ class UUVEnv(PX4MJEnv):
         )
 
     def _update_vehicle_visuals(self) -> None:
-        armed = self._px4_transport.update_arming_state()
+        armed = self._px4_armed_cached
         target_speeds = np.asarray(
             [self._compute_visual_rotor_speed(i, armed) for i in range(self._rotor_count)],
             dtype=float,

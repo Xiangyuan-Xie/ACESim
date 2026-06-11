@@ -671,7 +671,7 @@ class FWEnv(PX4MJEnv):
         self._apply_surface_targets()
         if self._puller_mocap_id < 0:
             return
-        armed = self._px4_transport.update_arming_state()
+        armed = self._px4_armed_cached
         target_speed = self._compute_visual_prop_speed(armed)
         rotor_angles = np.asarray([self._puller_angle], dtype=float)
         visual_speeds = np.asarray([self._visual_puller_angular_velocity], dtype=float)
