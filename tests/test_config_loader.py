@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 compatibility
@@ -57,6 +59,54 @@ class ConfigLoaderTests(unittest.TestCase):
         params = config["params"]
         self.assertNotIn("air_density", params["downwash"])
         self.assertNotIn("body_aero_drag", params)
+
+    def test_only_x500_arm2x_enables_arm_command_stream_by_default(self) -> None:
+        x500 = tomllib.loads((ROOT / "acesim" / "config" / "mujoco" / "x500.toml").read_text())["params"]
+        x500_arm = tomllib.loads((ROOT / "acesim" / "config" / "mujoco" / "x500_arm2x.toml").read_text())["params"]
+
+        self.assertNotIn("arm_command_stream", x500)
+        self.assertTrue(x500_arm["arm_command_stream"]["enabled"])
+        self.assertEqual(x500_arm["arm_command_stream"]["zmq_endpoint"], "tcp://0.0.0.0:5604")
+
+    def test_x500_assets_enable_vehicle_truth_stream(self) -> None:
+        x500 = tomllib.loads((ROOT / "acesim" / "config" / "mujoco" / "x500.toml").read_text())["params"]
+        x500_arm = tomllib.loads((ROOT / "acesim" / "config" / "mujoco" / "x500_arm2x.toml").read_text())["params"]
+
+        for params in (x500, x500_arm):
+            self.assertTrue(params["truth_stream"]["enabled"])
+            self.assertEqual(params["truth_stream"]["rate_hz"], 120.0)
+            self.assertEqual(params["truth_stream"]["zmq_endpoint"], "tcp://0.0.0.0:5605")
+
+    def test_x500_uses_air_gear_450ii_table_coefficients(self) -> None:
+        x500 = tomllib.loads((ROOT / "acesim" / "config" / "mujoco" / "x500.toml").read_text())["params"]
+
+        self.assertAlmostEqual(x500["max_rot_velocity"], 1032.2226262144864)
+        self.assertAlmostEqual(x500["motor_constant"], 1.2108824692304194e-05)
+        self.assertAlmostEqual(x500["moment_constant"], 0.014363125015663197)
+        np.testing.assert_allclose(
+            x500["throttle_to_omega"]["coefficients"],
+            [0.0, 1.3883712147882463, -0.3866198458183226],
+        )
+        self.assertNotIn("thrust_intercept", x500)
+        self.assertNotIn("moment_intercept", x500)
+        self.assertNotIn("throttle_curve", x500)
+        self.assertNotIn("model", x500["throttle_to_omega"])
+
+    def test_x500_arm2x_uses_f100_hq8045_rotor_coefficients(self) -> None:
+        params = tomllib.loads((ROOT / "acesim" / "config" / "mujoco" / "x500_arm2x.toml").read_text())["params"]
+
+        self.assertAlmostEqual(params["max_rot_velocity"], 1554.8789240167084)
+        self.assertAlmostEqual(params["motor_constant"], 9.810964962061632e-06)
+        self.assertAlmostEqual(params["moment_constant"], 0.027091347106075237)
+        self.assertAlmostEqual(params["rotor_radius"], 0.1016)
+        np.testing.assert_allclose(
+            params["throttle_to_omega"]["coefficients"],
+            [0.0, 1.755537447080606, -0.7549872697502744],
+        )
+        self.assertNotIn("thrust_intercept", params)
+        self.assertNotIn("moment_intercept", params)
+        self.assertNotIn("throttle_curve", params)
+        self.assertNotIn("model", params["throttle_to_omega"])
 
     def test_shared_asset_params_helper_reads_optional_tables(self) -> None:
         params = {"visual_stream": {"enabled": True}}

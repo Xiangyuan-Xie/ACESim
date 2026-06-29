@@ -743,7 +743,10 @@ def postprocess_xml(
         if config.target in PX4_TARGETS and is_collision:
             geom.set("rgba", "0 0 0 0")
 
-    add_collision_exclusions(root)
+    add_collision_exclusions(
+        root,
+        (("link_4", "gripper_left"), ("link_4", "gripper_right")) if config.target == "x500_arm2x" else (),
+    )
     sort_attributes(root)
     calibrate_home_height(root, xml_path, config)
     if worldbody is not None:

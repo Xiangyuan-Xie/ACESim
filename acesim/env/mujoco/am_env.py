@@ -18,6 +18,7 @@ from acesim.utils.arm_servo_scheduler import ArmControlSample, ArmServoScheduler
 from acesim.utils.arm_state_publisher import ArmStatePublisher
 from acesim.utils.delay import parse_delay_range_ms
 from acesim.utils.math import calculate_coupled_gripper_positions
+from acesim.utils.sim_streams import ArmCommandStreamParams, ArmCommandStreamSubscriber
 
 
 @dataclass
@@ -65,11 +66,15 @@ class AMEnv(MCEnv):
         self._arm_command_only = self._parse_arm_command_only()
         self._fixed_arm_pose = self._parse_fixed_arm_pose()
         self._arm_command_socket: zmq.Socket | None = None
+        self._arm_command_stream_subscriber: ArmCommandStreamSubscriber | None = None
         self._active_arm_motion: _ArmMotionCommand | None = None
         self._held_arm_pose: list[float] | None = None
         super().__init__(config_loader)
         asset_params = config_loader.get_asset_params()
         config = asset_params
+        self._arm_command_stream_params = ArmCommandStreamParams.from_asset_params(asset_params)
+        if self._arm_command_stream_params.enabled and os.environ.get("ACESIM_ARM_COMMAND_ENDPOINT"):
+            raise ValueError("arm_command_stream cannot be enabled with ACESIM_ARM_COMMAND_ENDPOINT")
         arm_config = config.get("arm", {})
         if not isinstance(arm_config, Mapping):
             raise ValueError("arm must be a table")
@@ -88,7 +93,11 @@ class AMEnv(MCEnv):
                 "joint_state_delay_ms",
             ),
         )
-        self._robot = None if self._fixed_arm_pose is not None or self._arm_command_only else make_robot()
+        self._robot = (
+            None
+            if self._fixed_arm_pose is not None or self._arm_command_only or self._arm_command_stream_params.enabled
+            else make_robot()
+        )
         self._arm_actuator_ids = [
             mujoco.mj_name2id(self._mj_model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
             for name in self._arm_actuated_joint_names
@@ -99,6 +108,8 @@ class AMEnv(MCEnv):
         ]
         self._arm_state_publisher = ArmStatePublisher()
         self._initialize_arm_command_socket()
+        if self._arm_command_stream_params.enabled:
+            self._arm_command_stream_subscriber = ArmCommandStreamSubscriber(self._arm_command_stream_params)
         self._arm_servo_scheduler = ArmServoScheduler(
             clock=self._sim_clock,
             publisher=self._arm_state_publisher,
@@ -113,6 +124,11 @@ class AMEnv(MCEnv):
         if self._fixed_arm_pose is not None:
             self._apply_fixed_arm_pose()
         elif self._arm_command_only:
+            self._held_arm_pose = self._expand_arm_pose_with_coupled_gripper(
+                self._current_arm_pose()[:5],
+                field_name="current arm pose",
+            )
+        elif self._arm_command_stream_subscriber is not None:
             self._held_arm_pose = self._expand_arm_pose_with_coupled_gripper(
                 self._current_arm_pose()[:5],
                 field_name="current arm pose",
@@ -429,6 +445,14 @@ class AMEnv(MCEnv):
         if self._fixed_arm_pose is not None:
             return ArmControlSample(joint_positions=self._fixed_arm_pose)
 
+        if self._arm_command_stream_subscriber is not None:
+            command = self._arm_command_stream_subscriber.read_latest()
+            if command is not None:
+                self._held_arm_pose = list(command["positions"])
+            if self._held_arm_pose is not None:
+                return ArmControlSample(joint_positions=self._held_arm_pose)
+            return None
+
         benchmark_pose = self._sample_active_arm_motion()
         if benchmark_pose is not None:
             return ArmControlSample(joint_positions=benchmark_pose)
@@ -490,5 +514,8 @@ class AMEnv(MCEnv):
         if self._arm_command_socket is not None:
             self._arm_command_socket.close(linger=0)
             self._arm_command_socket = None
+        if self._arm_command_stream_subscriber is not None:
+            self._arm_command_stream_subscriber.close()
+            self._arm_command_stream_subscriber = None
         self._arm_state_publisher.close()
         super().close()

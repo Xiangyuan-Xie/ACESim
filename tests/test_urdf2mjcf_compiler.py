@@ -254,6 +254,15 @@ class URDF2MJCFCompilerTests(unittest.TestCase):
                 self.assertEqual(actuators[name]["forcerange"], forcerange)
                 self.assertEqual(actuators[name]["ctrlrange"], ctrlrange)
 
+            contact_excludes = set()
+            for exclude in root.findall("./contact/exclude"):
+                body1 = exclude.get("body1")
+                body2 = exclude.get("body2")
+                if body1 is not None and body2 is not None:
+                    contact_excludes.add(tuple(sorted((body1, body2))))
+            self.assertIn(("gripper_left", "link_4"), contact_excludes)
+            self.assertIn(("gripper_right", "link_4"), contact_excludes)
+
 
 if __name__ == "__main__":
     unittest.main()

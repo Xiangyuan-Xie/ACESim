@@ -36,6 +36,32 @@ class LumpedDragParams:
 
 
 @dataclass(frozen=True)
+class ThrottleToOmegaParams:
+    """Quadratic throttle-to-rotor-speed fraction mapping."""
+
+    coefficients: np.ndarray
+
+    @classmethod
+    def from_config(cls, config: dict[str, object] | None) -> "ThrottleToOmegaParams":
+        if not config:
+            return cls(coefficients=np.array([0.0, 1.0, 0.0], dtype=float))
+        if "model" in config:
+            raise ValueError("throttle_to_omega does not support a model field")
+        coefficients = np.asarray(config.get("coefficients", [0.0, 1.0, 0.0]), dtype=float)
+        if coefficients.shape != (3,) or not np.all(np.isfinite(coefficients)):
+            raise ValueError("coefficients must contain exactly three finite numbers")
+        return cls(coefficients=coefficients)
+
+    def evaluate(self, throttle: ArrayLikeFloat) -> ArrayLikeFloat:
+        u = np.clip(np.asarray(throttle, dtype=float), 0.0, 1.0)
+        c0, c1, c2 = self.coefficients
+        value = np.clip(c0 + c1 * u + c2 * u * u, 0.0, 1.0)
+        if np.isscalar(throttle):
+            return float(value)
+        return value
+
+
+@dataclass(frozen=True)
 class RotorFlowParams:
     """Lightweight rotor-flow correction parameters."""
 
@@ -297,9 +323,11 @@ def rotor_thrust_moment_along_axis(
     motor_constant: float,
     moment_constant: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    thrust_scalar = abs(float(motor_constant) * float(omega_radps) * abs(float(omega_radps)))
+    omega = float(omega_radps)
+    thrust_scalar = max(0.0, float(motor_constant) * omega * abs(omega))
+    moment_scalar = float(moment_constant) * thrust_scalar
     axis_arr = np.asarray(axis, dtype=float)
-    return axis_arr * thrust_scalar, -float(spin_direction) * thrust_scalar * float(moment_constant) * axis_arr
+    return axis_arr * thrust_scalar, -float(spin_direction) * moment_scalar * axis_arr
 
 
 def thruster_wrenches_from_speed(

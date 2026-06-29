@@ -286,17 +286,22 @@ class PX4SensorScheduler:
         if self._params.send_mag:
             if mag_due:
                 assert mag_frd is not None
-                self._last_mag_frd = mag_frd + np.random.normal(0.0, self._params.mag_noise_std_gauss, size=3)
+                mag_noise_std = np.asarray(self._params.mag_noise_std_gauss, dtype=float)
+                self._last_mag_frd = mag_frd.copy()
+                if np.any(mag_noise_std > 0.0):
+                    if mag_noise_std.ndim == 0:
+                        self._last_mag_frd += np.random.normal(0.0, float(mag_noise_std), size=3)
+                    else:
+                        self._last_mag_frd += np.random.normal(0.0, mag_noise_std)
                 self._mag_pending = True
 
         if self._params.send_baro:
             if baro_due:
                 assert position_world_m is not None
-                self._last_baro_altitude_m = float(
-                    self._params.gps_alt_start
-                    + position_world_m[2]
-                    + np.random.normal(0.0, self._params.baro_noise_std_m)
-                )
+                baro_altitude_m = float(self._params.gps_alt_start + position_world_m[2])
+                if self._params.baro_noise_std_m > 0.0:
+                    baro_altitude_m += float(np.random.normal(0.0, self._params.baro_noise_std_m))
+                self._last_baro_altitude_m = baro_altitude_m
                 self._baro_pending = True
 
         sensor_sent = False
@@ -304,8 +309,17 @@ class PX4SensorScheduler:
             assert sample is not None
             assert accel_frd is not None
             assert gyro_frd is not None
-            self._last_accel_frd = accel_frd + np.random.normal(0.0, self._params.accel_noise_std_mps2)
-            self._last_gyro_frd = gyro_frd + np.random.normal(0.0, self._params.gyro_noise_std_radps, size=3)
+            accel_noise_std = np.asarray(self._params.accel_noise_std_mps2, dtype=float)
+            gyro_noise_std = np.asarray(self._params.gyro_noise_std_radps, dtype=float)
+            self._last_accel_frd = accel_frd.copy()
+            self._last_gyro_frd = gyro_frd.copy()
+            if np.any(accel_noise_std > 0.0):
+                self._last_accel_frd += np.random.normal(0.0, accel_noise_std)
+            if np.any(gyro_noise_std > 0.0):
+                if gyro_noise_std.ndim == 0:
+                    self._last_gyro_frd += np.random.normal(0.0, float(gyro_noise_std), size=3)
+                else:
+                    self._last_gyro_frd += np.random.normal(0.0, gyro_noise_std)
             self._last_diff_pressure_hpa = diff_pressure_hpa
             self._last_temperature_celsius = temperature_celsius
             fields = self._px4_transport.HIL_SENSOR_FIELDS_ACCEL | self._px4_transport.HIL_SENSOR_FIELDS_GYRO
@@ -354,20 +368,18 @@ class PX4SensorScheduler:
             if gps_due:
                 assert position_world_m is not None
                 assert velocity_world_mps is not None
-                noisy_position_world_m = position_world_m + np.random.normal(
-                    0.0, self._params.gps_pos_noise_std_m, size=3
-                )
+                noisy_position_world_m = position_world_m.copy()
+                if self._params.gps_pos_noise_std_m > 0.0:
+                    noisy_position_world_m += np.random.normal(0.0, self._params.gps_pos_noise_std_m, size=3)
                 latitude_deg = self._params.gps_home_lat_lon[0] + (noisy_position_world_m[0] / 111319.9)
                 longitude_deg = self._params.gps_home_lat_lon[1] - (
                     noisy_position_world_m[1] / (111319.9 * np.cos(np.radians(self._params.gps_home_lat_lon[0])))
                 )
                 gps_altitude_m = self._params.gps_alt_start + noisy_position_world_m[2]
 
-                noisy_velocity_world_mps = velocity_world_mps + np.random.normal(
-                    0.0,
-                    self._params.gps_vel_noise_std_mps,
-                    size=3,
-                )
+                noisy_velocity_world_mps = velocity_world_mps.copy()
+                if self._params.gps_vel_noise_std_mps > 0.0:
+                    noisy_velocity_world_mps += np.random.normal(0.0, self._params.gps_vel_noise_std_mps, size=3)
                 velocity_ned_cm_s = world_nwu_to_ned(noisy_velocity_world_mps) * 100.0
                 velocity_north_cm_s = float(velocity_ned_cm_s[0])
                 velocity_east_cm_s = float(velocity_ned_cm_s[1])
@@ -393,12 +405,27 @@ class PX4SensorScheduler:
                 assert position_world_m is not None
                 assert attitude_world_quat is not None
                 if self._vision_attitude_is_plausible(attitude_world_quat):
+                    noisy_position_world_m = position_world_m.copy()
+                    noisy_attitude_world_quat = attitude_world_quat.copy()
+                    vision_position_noise_std = np.asarray(self._params.vision_position_noise_std_m, dtype=float)
+                    if np.any(vision_position_noise_std > 0.0):
+                        noisy_position_world_m += np.random.normal(0.0, vision_position_noise_std)
+                    if self._params.vision_orientation_noise_std_rad > 0.0:
+                        truth_rotation = Rotation.from_quat(attitude_world_quat, scalar_first=True)
+                        noise_rotation = Rotation.from_rotvec(
+                            np.random.normal(0.0, self._params.vision_orientation_noise_std_rad, size=3)
+                        )
+                        quat_xyzw = (noise_rotation * truth_rotation).as_quat()
+                        noisy_attitude_world_quat = np.array(
+                            [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]], dtype=float
+                        )
+                        noisy_attitude_world_quat /= np.linalg.norm(noisy_attitude_world_quat)
                     delay_min_ms, delay_max_ms = self._params.vision_delay_ms
                     if delay_max_ms <= 0.0:
                         self._px4_transport.send_vision_position_estimate(
                             current_time_us,
-                            position_world_m,
-                            attitude_world_quat,
+                            noisy_position_world_m,
+                            noisy_attitude_world_quat,
                         )
                     else:
                         delay_ms = (
@@ -410,8 +437,8 @@ class PX4SensorScheduler:
                             _DelayedVision(
                                 sample_time_us=current_time_us,
                                 release_time_us=int(round(current_time_us + delay_ms * 1000.0)),
-                                position_world_m=position_world_m.copy(),
-                                attitude_world_quat=attitude_world_quat.copy(),
+                                position_world_m=noisy_position_world_m,
+                                attitude_world_quat=noisy_attitude_world_quat,
                             )
                         )
                     self._last_sent_vision_quat = attitude_world_quat.copy()

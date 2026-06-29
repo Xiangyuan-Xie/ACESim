@@ -65,6 +65,66 @@ class _ConnectedFakePX4Transport(_FakePX4Transport):
         return self.has_new_controls
 
 
+class _ReleasedControlsFakePX4Transport(_ConnectedFakePX4Transport):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.controls = np.array([0.0, 0.25, 0.5, 1.0], dtype=float)
+
+    def read_applied_actuator_controls(self, channel_count: int) -> np.ndarray:
+        values = np.zeros(channel_count, dtype=float)
+        count = min(channel_count, self.controls.size)
+        values[:count] = self.controls[:count]
+        return values
+
+
+class _RecordingControlStreamPublisher:
+    instances: list["_RecordingControlStreamPublisher"] = []
+
+    def __init__(self, params: object) -> None:
+        self.params = params
+        self.published: list[tuple[int, np.ndarray]] = []
+        self.closed = False
+        self.__class__.instances.append(self)
+
+    def publish(self, timestamp_us: int, controls: np.ndarray) -> None:
+        self.published.append((int(timestamp_us), np.asarray(controls, dtype=float).copy()))
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _RecordingTruthStreamPublisher:
+    instances: list["_RecordingTruthStreamPublisher"] = []
+
+    def __init__(self, params: object) -> None:
+        self.params = params
+        self.is_enabled = bool(getattr(params, "enabled", False))
+        self.published: list[tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
+        self.closed = False
+        self.__class__.instances.append(self)
+
+    def publish(
+        self,
+        timestamp_us: int,
+        position_world_m_nwu: np.ndarray,
+        attitude_world_quat_scalar_first: np.ndarray,
+        linear_velocity_world_mps_nwu: np.ndarray,
+        angular_velocity_body_radps_flu: np.ndarray,
+    ) -> None:
+        self.published.append(
+            (
+                int(timestamp_us),
+                np.asarray(position_world_m_nwu, dtype=float).copy(),
+                np.asarray(attitude_world_quat_scalar_first, dtype=float).copy(),
+                np.asarray(linear_velocity_world_mps_nwu, dtype=float).copy(),
+                np.asarray(angular_velocity_body_radps_flu, dtype=float).copy(),
+            )
+        )
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _ArmingCountingPX4Transport(_ConnectedFakePX4Transport):
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
@@ -188,6 +248,8 @@ def _set_sensor(env: _SupportsSensorSeeding, sensor_name: str, values: np.ndarra
 
 @patch("acesim.env.mujoco.px4_mj_env.VehicleVisualStatePublisher", _FakeVisualPublisher)
 @patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _FakePX4Transport)
+@patch("acesim.env.mujoco.px4_mj_env.ControlStreamPublisher", _RecordingControlStreamPublisher)
+@patch("acesim.env.mujoco.px4_mj_env.VehicleTruthStatePublisher", _RecordingTruthStreamPublisher)
 @patch("acesim.env.mujoco.mj_env.ClockPublisher", _FakeClockPublisher)
 class MujocoVehicleDynamicsTests(unittest.TestCase):
     def _seed_kinematics(
@@ -264,7 +326,9 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
             env._handle_applied_actuator_controls(controls)
 
             expected_controls = np.array([1.0, 0.25, 0.0, 1.0], dtype=float)
-            expected_speed_targets = expected_controls * env._params.max_rot_velocity
+            expected_speed_targets = (
+                env._params.throttle_to_omega.evaluate(expected_controls) * env._params.max_rot_velocity
+            )
             np.testing.assert_allclose(env._applied_actuator_controls, expected_controls)
             np.testing.assert_allclose(
                 env._desired_rotor_angular_velocity,
@@ -375,6 +439,84 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         finally:
             env.close()
 
+    def test_px4_control_stream_does_not_inject_mujoco_user_sensors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = _write_mujoco_config(Path(tmp_dir), env_type="mc", asset_name="x500")
+            with patch("acesim.env.mujoco.px4_mj_env.ControlStreamPublisher", _RecordingControlStreamPublisher):
+                env = MCEnv(ConfigLoader(config_path))
+        try:
+            sensor_id = mujoco.mj_name2id(env._mj_model, mujoco.mjtObj.mjOBJ_SENSOR, "px4_control_0")
+            self.assertLess(sensor_id, 0)
+        finally:
+            env.close()
+
+    def test_px4_control_stream_publishes_released_controls_once(self) -> None:
+        _RecordingControlStreamPublisher.instances.clear()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = _write_mujoco_config(Path(tmp_dir), env_type="mc", asset_name="x500")
+            with (
+                patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _ReleasedControlsFakePX4Transport),
+                patch(
+                    "acesim.env.mujoco.px4_mj_env.ControlStreamPublisher",
+                    _RecordingControlStreamPublisher,
+                ),
+            ):
+                env = MCEnv(ConfigLoader(config_path))
+        try:
+            env._simulation_time_us = 42000
+            env._update_px4_controls()
+
+            publisher = _RecordingControlStreamPublisher.instances[0]
+            self.assertEqual(len(publisher.published), 1)
+            timestamp_us, controls = publisher.published[0]
+            self.assertEqual(timestamp_us, 42000)
+            np.testing.assert_allclose(controls, [0.0, 0.25, 0.5, 1.0])
+
+            transport = cast(_ReleasedControlsFakePX4Transport, env._px4_transport)
+            transport.has_new_controls = False
+            transport.controls[:] = 1.0
+            env._update_px4_controls()
+
+            self.assertEqual(len(publisher.published), 1)
+        finally:
+            env.close()
+
+    def test_vehicle_truth_stream_publishes_post_step_truth_state_at_configured_rate(self) -> None:
+        _RecordingTruthStreamPublisher.instances.clear()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = _write_mujoco_config(Path(tmp_dir), env_type="mc", asset_name="x500")
+            env = MCEnv(ConfigLoader(config_path))
+        try:
+            publisher = _RecordingTruthStreamPublisher.instances[0]
+            self.assertTrue(publisher.is_enabled)
+
+            self._seed_kinematics(
+                env,
+                pos=np.array([1.0, 2.0, 3.0], dtype=float),
+                linvel=np.array([4.0, 5.0, 6.0], dtype=float),
+                gyro=np.array([0.7, 0.8, 0.9], dtype=float),
+            )
+            env._simulation_time_us = 0
+            env._publish_truth_state_if_due()
+
+            self.assertEqual(len(publisher.published), 1)
+            timestamp_us, position, quat, linear_velocity, angular_velocity = publisher.published[0]
+            self.assertEqual(timestamp_us, 0)
+            np.testing.assert_allclose(position, [1.0, 2.0, 3.0])
+            np.testing.assert_allclose(quat, [1.0, 0.0, 0.0, 0.0])
+            np.testing.assert_allclose(linear_velocity, [4.0, 5.0, 6.0])
+            np.testing.assert_allclose(angular_velocity, [0.7, 0.8, 0.9])
+
+            env._simulation_time_us = 1_000
+            env._publish_truth_state_if_due()
+            self.assertEqual(len(publisher.published), 1)
+
+            env._simulation_time_us = int(round(1_000_000.0 / 120.0))
+            env._publish_truth_state_if_due()
+            self.assertEqual(len(publisher.published), 2)
+        finally:
+            env.close()
+
     def test_vtol_visual_update_polls_px4_arming_state_once_per_control_callback(self) -> None:
         with patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _ArmingCountingPX4Transport):
             env = VTOLEnv(ConfigLoader(_config_path("standard_vtol")))
@@ -482,8 +624,10 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
         finally:
             env.close()
 
-    def test_multicopter_linear_speed_command_produces_quadratic_thrust_at_steady_state(self) -> None:
-        env = MCEnv(ConfigLoader(_config_path("default")))
+    def test_multicopter_throttle_to_omega_produces_quadratic_thrust_at_steady_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = _write_mujoco_config(Path(tmp_dir), env_type="mc", asset_name="x500_arm2x")
+            env = MCEnv(ConfigLoader(config_path))
         try:
             self._seed_kinematics(env, pos=np.array([0.0, 0.0, 1.0]), linvel=np.zeros(3))
             actuator_output = 0.25
@@ -498,8 +642,32 @@ class MujocoVehicleDynamicsTests(unittest.TestCase):
                 np.zeros(3, dtype=float),
             )
 
-            expected_thrust = actuator_output**2 * env._params.motor_constant * env._params.max_rot_velocity**2
+            expected_fraction = env._params.throttle_to_omega.evaluate(actuator_output)
+            expected_thrust = env._params.motor_constant * (expected_fraction * env._params.max_rot_velocity) ** 2
             np.testing.assert_allclose(rotor_thrusts, expected_thrust)
+        finally:
+            env.close()
+
+    def test_multicopter_low_speed_throttle_has_positive_thrust_without_intercept_dead_zone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = _write_mujoco_config(Path(tmp_dir), env_type="mc", asset_name="x500_arm2x")
+            env = MCEnv(ConfigLoader(config_path))
+        try:
+            self._seed_kinematics(env, pos=np.array([0.0, 0.0, 1.0]), linvel=np.zeros(3))
+            env._handle_applied_actuator_controls(np.full(env._rotor_count, 0.1, dtype=float))
+            env._update_rotor_speed_state(1.0)
+
+            _, _, rotor_thrusts, rotor_force_w, rotor_moment_w = env._compute_rotor_wrenches(
+                np.array([0.0, 0.0, 1.0], dtype=float),
+                Rotation.identity(),
+                Rotation.identity(),
+                np.zeros(3, dtype=float),
+                np.zeros(3, dtype=float),
+            )
+
+            self.assertTrue(np.all(rotor_thrusts > 0.0))
+            self.assertTrue(np.all(rotor_force_w[:, 2] > 0.0))
+            self.assertTrue(np.any(np.abs(rotor_moment_w[:, 2]) > 0.0))
         finally:
             env.close()
 

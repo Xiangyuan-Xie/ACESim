@@ -1259,7 +1259,9 @@ def test_managed_stack_headless_uses_arm_command_endpoint_not_fixed_pose(tmp_pat
     fake_launch_common.bridge_config_path = lambda: "bridges.yaml"
     fake_launch_common.load_bridge_entries = lambda _path: [
         {"name": "simulation_clock", "enabled": True, "endpoint": "tcp://127.0.0.1:5600"},
+        {"name": "px4_controls", "enabled": True, "endpoint": "tcp://127.0.0.1:5602"},
         {"name": "arm_state", "enabled": True, "endpoint": "tcp://127.0.0.1:5603"},
+        {"name": "vehicle_truth", "enabled": True, "endpoint": "tcp://127.0.0.1:5605"},
     ]
     fake_launch_common.resolve_bridge_host = lambda _mode: "127.0.0.1"
     fake_launch_common.build_bridge_endpoint_overrides = _fake_bridge_endpoint_overrides
@@ -1317,6 +1319,8 @@ def test_managed_stack_headless_uses_arm_command_endpoint_not_fixed_pose(tmp_pat
     assert "ACESIM_FIXED_ARM_POSE" not in command_text
     assert "ACESIM_ARM_COMMAND_ENDPOINT" in command_text
     assert "ACESIM_ARM_COMMAND_ONLY" in command_text
+    assert "ACESIM_ARM_COMMAND_STREAM_ENABLED" in command_text
+    assert "ACESIM_TRUTH_ZMQ_ENDPOINT" in command_text
     assert "--real-time-rate" not in command_text
 
 
@@ -1372,7 +1376,9 @@ def test_managed_stack_sets_px4_uxrce_port_env_to_match_agent(tmp_path: Path) ->
     fake_launch_common.bridge_config_path = lambda: "bridges.yaml"
     fake_launch_common.load_bridge_entries = lambda _path: [
         {"name": "simulation_clock", "enabled": True, "endpoint": "tcp://127.0.0.1:5600"},
+        {"name": "px4_controls", "enabled": True, "endpoint": "tcp://127.0.0.1:5602"},
         {"name": "arm_state", "enabled": True, "endpoint": "tcp://127.0.0.1:5603"},
+        {"name": "vehicle_truth", "enabled": True, "endpoint": "tcp://127.0.0.1:5605"},
     ]
     fake_launch_common.resolve_bridge_host = lambda _mode: "127.0.0.1"
     fake_launch_common.build_bridge_endpoint_overrides = _fake_bridge_endpoint_overrides
@@ -1436,6 +1442,10 @@ def test_managed_stack_sets_px4_uxrce_port_env_to_match_agent(tmp_path: Path) ->
     assert px4[2]["PX4_PARAM_UXRCE_DDS_PRT"] == str(isolation.xrce_port)
     assert px4[2]["PX4_UXRCE_DDS_PORT"] == str(isolation.xrce_port)
     assert px4[2]["PX4_UXRCE_DDS_NS"] == ""
+    headless = next(item for item in commands if item[0] == "headless")
+    headless_command = " ".join(headless[1])
+    assert "ACESIM_TRUTH_ZMQ_ENDPOINT" in headless_command
+    assert isolation.truth_zmq_endpoint in headless_command
 
 
 def test_run_case_retries_transient_post_start_failure_once() -> None:

@@ -23,6 +23,9 @@ def quat_rotate(q: Sequence[float], v: Sequence[float]) -> List[float]:
     return [float(res[0]), float(res[1]), float(res[2])]
 
 
+GRIPPER_JOINT5_CLOSED_RAD = -1.723
+
+
 def calculate_slider_position(
     theta_rad: float, r: float = 0.02821, L: float = 0.0343, calibration_offset: float = 0.665
 ):
@@ -35,4 +38,17 @@ def calculate_slider_position(
 def calculate_coupled_gripper_positions(joint5_rad: float) -> tuple[float, float]:
     """Return MuJoCo left/right gripper slider qpos coupled to joint_5."""
     opening = 0.04225 - float(calculate_slider_position(abs(float(joint5_rad))))
-    return -opening, opening
+    slider = -opening
+    return slider, slider
+
+
+def gripper_public_to_joint5(public_position: float) -> float:
+    """Convert ACETele public gripper position to MuJoCo joint_5 radians."""
+    open_fraction = float(np.clip(float(public_position), 0.0, 1.0))
+    return GRIPPER_JOINT5_CLOSED_RAD * (1.0 - open_fraction)
+
+
+def joint5_to_gripper_public(joint5_rad: float) -> float:
+    """Convert MuJoCo joint_5 radians to ACETele public gripper position."""
+    closed_fraction = float(np.clip(float(joint5_rad) / GRIPPER_JOINT5_CLOSED_RAD, 0.0, 1.0))
+    return 1.0 - closed_fraction

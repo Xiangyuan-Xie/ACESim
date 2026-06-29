@@ -53,6 +53,35 @@ class _FakeVisualPublisher:
         return None
 
 
+class _FakeControlStreamPublisher:
+    def __init__(self, params: object) -> None:
+        self.is_enabled = False
+
+    def publish(self, timestamp_us: int, controls: object) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class _FakeTruthStreamPublisher:
+    def __init__(self, params: object) -> None:
+        self.is_enabled = False
+
+    def publish(
+        self,
+        timestamp_us: int,
+        position_world_m_nwu: object,
+        attitude_world_quat_scalar_first: object,
+        linear_velocity_world_mps_nwu: object,
+        angular_velocity_body_radps_flu: object,
+    ) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
 class _FakeArmStatePublisher:
     def __init__(self, *args: object, **kwargs: object) -> None:
         return None
@@ -68,6 +97,24 @@ class _FakeArmStatePublisher:
 
     def close(self) -> None:
         return None
+
+
+class _FakeArmCommandStreamSubscriber:
+    instances: list["_FakeArmCommandStreamSubscriber"] = []
+    next_command: dict[str, object] | None = None
+
+    def __init__(self, params: object) -> None:
+        self.params = params
+        self.closed = False
+        self.__class__.instances.append(self)
+
+    def read_latest(self) -> dict[str, object] | None:
+        command = self.__class__.next_command
+        self.__class__.next_command = None
+        return command
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class _FakeClockPublisher:
@@ -136,6 +183,8 @@ def _config_path(name: str) -> Path:
 @patch("acesim.env.mujoco.am_env.make_robot", lambda: _FakeRobotAgent())
 @patch("acesim.env.mujoco.am_env.ArmStatePublisher", _FakeArmStatePublisher)
 @patch("acesim.env.mujoco.px4_mj_env.VehicleVisualStatePublisher", _FakeVisualPublisher)
+@patch("acesim.env.mujoco.px4_mj_env.ControlStreamPublisher", _FakeControlStreamPublisher)
+@patch("acesim.env.mujoco.px4_mj_env.VehicleTruthStatePublisher", _FakeTruthStreamPublisher)
 @patch("acesim.env.mujoco.px4_mj_env.PX4Transport", _FakePX4Transport)
 @patch("acesim.env.mujoco.mj_env.ClockPublisher", _FakeClockPublisher)
 class MujocoHeadlessStartupTests(unittest.TestCase):
@@ -143,7 +192,11 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
         loader = ConfigLoader(config_file)
         module_name, class_name = loader.get_sim_info()
         env_cls = getattr(import_module(module_name), class_name)
-        env = env_cls(loader)
+        env_patch = {}
+        if "ACESIM_ARM_COMMAND_STREAM_ENABLED" not in os.environ:
+            env_patch["ACESIM_ARM_COMMAND_STREAM_ENABLED"] = "0"
+        with patch.dict(os.environ, env_patch, clear=False):
+            env = env_cls(loader)
         try:
             for _ in range(3):
                 env.step()
@@ -156,7 +209,11 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
         loader = ConfigLoader(config_file)
         module_name, class_name = loader.get_sim_info()
         env_cls = getattr(import_module(module_name), class_name)
-        return env_cls(loader)
+        env_patch = {}
+        if "ACESIM_ARM_COMMAND_STREAM_ENABLED" not in os.environ:
+            env_patch["ACESIM_ARM_COMMAND_STREAM_ENABLED"] = "0"
+        with patch.dict(os.environ, env_patch, clear=False):
+            return env_cls(loader)
 
     def _send_arm_motion_command(
         self,
@@ -202,6 +259,29 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
                     'scene_name = "default"',
                     f'asset_name = "{asset_name}"',
                     'benchmark = "multirotor"',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return config_path
+
+    def _write_am_stream_config(self, root: Path) -> Path:
+        asset_dst_dir = root / "mujoco"
+        asset_dst_dir.mkdir(parents=True, exist_ok=True)
+        asset_src = Path(__file__).resolve().parents[1] / "acesim" / "config" / "mujoco" / "x500_arm2x.toml"
+        asset_text = asset_src.read_text(encoding="utf-8")
+        (asset_dst_dir / "x500_arm2x.toml").write_text(asset_text, encoding="utf-8")
+        config_path = root / "am_stream.toml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "[basic]",
+                    'sim_type = "mujoco"',
+                    'env_type = "am"',
+                    'scene_name = "default"',
+                    'asset_name = "x500_arm2x"',
+                    'benchmark = "am"',
                     "",
                 ]
             ),
@@ -382,6 +462,50 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
             self.assertEqual(list(sample.joint_positions), expected_home)
         finally:
             env.close()
+
+    def test_arm_command_stream_avoids_robot_agent_and_applies_latest_command(self) -> None:
+        def fail_make_robot() -> _FakeRobotAgent:
+            raise AssertionError("make_robot should not be called when arm_command_stream is enabled")
+
+        with tempfile.TemporaryDirectory(prefix="acesim_am_stream_") as tmpdir:
+            config_path = self._write_am_stream_config(Path(tmpdir))
+            _FakeArmCommandStreamSubscriber.next_command = {
+                "timestamp_us": 123,
+                "command_id": "leader",
+                "positions": [0.1, 0.2, 0.3, 0.4, 0.5, -0.01, -0.01],
+            }
+            with (
+                patch.dict(os.environ, {"ACESIM_ARM_COMMAND_STREAM_ENABLED": "1"}, clear=False),
+                patch("acesim.env.mujoco.am_env.make_robot", fail_make_robot),
+                patch("acesim.env.mujoco.am_env.ArmCommandStreamSubscriber", _FakeArmCommandStreamSubscriber),
+            ):
+                env = self._instantiate(config_path)
+
+        try:
+            sample = env._read_arm_control_target()
+            self.assertEqual(sample.joint_positions, [0.1, 0.2, 0.3, 0.4, 0.5, -0.01, -0.01])
+            env.close()
+            self.assertTrue(_FakeArmCommandStreamSubscriber.instances[-1].closed)
+        finally:
+            if not _FakeArmCommandStreamSubscriber.instances[-1].closed:
+                env.close()
+
+    def test_arm_command_stream_rejects_benchmark_command_socket_conflict(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="acesim_am_stream_conflict_") as tmpdir:
+            config_path = self._write_am_stream_config(Path(tmpdir))
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "ACESIM_ARM_COMMAND_ENDPOINT": "inproc://acesim_conflict",
+                        "ACESIM_ARM_COMMAND_STREAM_ENABLED": "1",
+                    },
+                    clear=False,
+                ),
+                patch("acesim.env.mujoco.am_env.ArmCommandStreamSubscriber", _FakeArmCommandStreamSubscriber),
+                self.assertRaisesRegex(ValueError, "arm_command_stream.*ACESIM_ARM_COMMAND_ENDPOINT"),
+            ):
+                self._instantiate(config_path)
 
     def test_arm_command_only_requires_command_endpoint(self) -> None:
         _FakePX4Transport.created_count = 0
@@ -597,6 +721,28 @@ class MujocoHeadlessStartupTests(unittest.TestCase):
         self.assertGreaterEqual(visual_id, 0)
         for axis in range(3):
             self.assertAlmostEqual(float(data.xpos[visual_id][axis]), float(data.xpos[physical_id][axis]), delta=1e-6)
+
+    def test_x500_arm_asset_excludes_wrist_gripper_self_collisions(self) -> None:
+        asset_path = (
+            Path(__file__).resolve().parents[1]
+            / "acesim"
+            / "env"
+            / "mujoco"
+            / "asset"
+            / "x500_arm2x"
+            / "x500_arm2x.xml"
+        )
+        model = mujoco.MjModel.from_xml_path(str(asset_path))
+        excluded_pairs = set()
+        for signature in model.exclude_signature:
+            body1 = int(signature) >> 16
+            body2 = int(signature) & 0xFFFF
+            name1 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body1)
+            name2 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body2)
+            excluded_pairs.add(tuple(sorted((name1, name2))))
+
+        self.assertIn(("gripper_left", "link_4"), excluded_pairs)
+        self.assertIn(("gripper_right", "link_4"), excluded_pairs)
 
     def test_default_x500_arm_env_resets_to_asset_home_keyframe(self) -> None:
         loader = ConfigLoader(_config_path("default"))

@@ -14,6 +14,12 @@ from acesim.env.mujoco.mj_env import MJEnv
 from acesim.utils.frame import body_flu_to_frd
 from acesim.utils.px4_sensor_scheduler import PX4SensorSample, PX4SensorScheduler
 from acesim.utils.px4_transport import PX4ActuatorParams, PX4SensorParams, PX4Transport
+from acesim.utils.sim_streams import (
+    ControlStreamParams,
+    ControlStreamPublisher,
+    VehicleTruthStatePublisher,
+    VehicleTruthStreamParams,
+)
 from acesim.utils.vehicle_visual_state_publisher import (
     VehicleVisualState,
     VehicleVisualStatePublisher,
@@ -34,11 +40,17 @@ class PX4MJEnv(MJEnv):
             )
             self._visual_stream_params = VehicleVisualStreamParams.from_asset_params(self._asset_params)
             self._px4_actuator_params = PX4ActuatorParams.from_asset_params(self._asset_params)
+            self._control_stream_params = ControlStreamParams.from_asset_params(self._asset_params)
+            self._truth_stream_params = VehicleTruthStreamParams.from_asset_params(self._asset_params)
 
             self._px4_transport = PX4Transport(self._px4_actuator_params)
+            self._control_stream_publisher = ControlStreamPublisher(self._control_stream_params)
             self._visual_state_publisher = VehicleVisualStatePublisher(self._visual_stream_params)
+            self._truth_state_publisher = VehicleTruthStatePublisher(self._truth_stream_params)
             self._visual_publish_period_us = int(round(1_000_000.0 / self._visual_stream_params.rate_hz))
             self._next_visual_publish_time_us = 0
+            self._truth_publish_period_us = int(round(1_000_000.0 / self._truth_stream_params.rate_hz))
+            self._next_truth_publish_time_us = 0
             self._px4_connection_polled_this_step = False
             self._px4_armed_cached = False
             self._interactive_viewer_mode = False
@@ -53,6 +65,12 @@ class PX4MJEnv(MJEnv):
             self._update_vehicle_visuals()
         except Exception:
             mujoco.set_mjcb_control(None)
+            if hasattr(self, "_truth_state_publisher"):
+                self._truth_state_publisher.close()
+            if hasattr(self, "_control_stream_publisher"):
+                self._control_stream_publisher.close()
+            if hasattr(self, "_visual_state_publisher"):
+                self._visual_state_publisher.close()
             self._sim_clock.close()
             raise
 
@@ -449,6 +467,7 @@ class PX4MJEnv(MJEnv):
         controls = self._px4_transport.read_applied_actuator_controls(channel_count)
         if controls is not None:
             self._handle_applied_actuator_controls(controls)
+            self._control_stream_publisher.publish(self._simulation_time_us, controls)
 
     def _apply_vehicle_physics(self) -> None:
         raise NotImplementedError
@@ -477,6 +496,7 @@ class PX4MJEnv(MJEnv):
         self._update_vehicle_visuals()
         if self._interactive_viewer_mode:
             self._publish_visual_state_if_due()
+            self._publish_truth_state_if_due()
             self._record_interactive_viewer_profile(data.time + model.opt.timestep)
 
     def _publish_visual_state_if_due(self) -> None:
@@ -487,6 +507,20 @@ class PX4MJEnv(MJEnv):
             self._visual_state_publisher.publish(self.read_visual_state())
             self._next_visual_publish_time_us += self._visual_publish_period_us
 
+    def _publish_truth_state_if_due(self) -> None:
+        if not self._truth_state_publisher.is_enabled:
+            return
+        current_time_us = self._simulation_time_us
+        while current_time_us >= self._next_truth_publish_time_us:
+            self._truth_state_publisher.publish(
+                current_time_us,
+                self._get_sensor_raw("pos"),
+                self._get_sensor_raw("quat"),
+                self._get_sensor_raw("linvel"),
+                self._get_sensor_raw("gyro"),
+            )
+            self._next_truth_publish_time_us += self._truth_publish_period_us
+
     def step(self) -> None:
         super().step()
         self._simulation_time_us = int(round(self._mj_data.time * 1_000_000.0))
@@ -496,10 +530,13 @@ class PX4MJEnv(MJEnv):
         if is_connected:
             self._sensor_scheduler.update()
         self._publish_visual_state_if_due()
+        self._publish_truth_state_if_due()
 
     def close(self) -> None:
         self._px4_transport.close()
+        self._control_stream_publisher.close()
         self._visual_state_publisher.close()
+        self._truth_state_publisher.close()
         super().close()
 
     def _before_interactive_viewer(self) -> None:

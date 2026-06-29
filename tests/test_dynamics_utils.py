@@ -9,6 +9,7 @@ from acesim.utils.dynamics import (
     LumpedDragParams,
     RotorFlowParams,
     RotorInertialTorqueParams,
+    ThrottleToOmegaParams,
     first_order_response_step,
     idle_visual_speed_target,
     rotor_thrust_moment_along_axis,
@@ -248,7 +249,7 @@ class DynamicsUtilsTests(unittest.TestCase):
         axis = np.array([0.0, 0.0, 1.0], dtype=float)
 
         thrust, moment = rotor_thrust_moment_along_axis(
-            omega_radps=-4.0,
+            omega_radps=4.0,
             axis=axis,
             spin_direction=-1.0,
             motor_constant=0.5,
@@ -257,6 +258,53 @@ class DynamicsUtilsTests(unittest.TestCase):
 
         np.testing.assert_allclose(thrust, np.array([0.0, 0.0, 8.0], dtype=float))
         np.testing.assert_allclose(moment, np.array([0.0, 0.0, 1.6], dtype=float))
+
+    def test_rotor_thrust_moment_zero_speed_has_zero_force_and_moment(self) -> None:
+        thrust, moment = rotor_thrust_moment_along_axis(
+            omega_radps=0.0,
+            axis=np.array([0.0, 0.0, 1.0], dtype=float),
+            spin_direction=1.0,
+            motor_constant=0.5,
+            moment_constant=0.2,
+        )
+
+        np.testing.assert_allclose(thrust, np.zeros(3, dtype=float))
+        np.testing.assert_allclose(moment, np.zeros(3, dtype=float))
+
+    def test_rotor_thrust_moment_nonzero_speed_has_positive_thrust(self) -> None:
+        thrust, moment = rotor_thrust_moment_along_axis(
+            omega_radps=1.0,
+            axis=np.array([0.0, 0.0, 1.0], dtype=float),
+            spin_direction=1.0,
+            motor_constant=0.5,
+            moment_constant=0.2,
+        )
+
+        np.testing.assert_allclose(thrust, np.array([0.0, 0.0, 0.5], dtype=float))
+        np.testing.assert_allclose(moment, np.array([0.0, 0.0, -0.1], dtype=float))
+
+    def test_throttle_to_omega_defaults_to_linear_mapping(self) -> None:
+        params = ThrottleToOmegaParams.from_config(None)
+
+        np.testing.assert_allclose(params.coefficients, np.array([0.0, 1.0, 0.0], dtype=float))
+        np.testing.assert_allclose(
+            params.evaluate(np.array([0.0, 0.25, 1.0], dtype=float)),
+            np.array([0.0, 0.25, 1.0], dtype=float),
+        )
+
+    def test_throttle_to_omega_parses_quadratic_coefficients(self) -> None:
+        params = ThrottleToOmegaParams.from_config({"coefficients": [0.0, 1.75553745, -0.75498727]})
+
+        self.assertAlmostEqual(params.evaluate(0.5), 1.75553745 * 0.5 - 0.75498727 * 0.25)
+        self.assertEqual(params.evaluate(1.0), 1.0)
+
+    def test_throttle_to_omega_rejects_model_field(self) -> None:
+        with self.assertRaisesRegex(ValueError, "throttle_to_omega does not support a model field"):
+            ThrottleToOmegaParams.from_config({"model": "omega_fraction_quadratic", "coefficients": [0.0, 1.0, 0.0]})
+
+    def test_throttle_to_omega_rejects_invalid_coefficients(self) -> None:
+        with self.assertRaisesRegex(ValueError, "coefficients must contain exactly three finite numbers"):
+            ThrottleToOmegaParams.from_config({"coefficients": [0.0, 1.0]})
 
     def test_thruster_wrenches_from_speed_vectorizes_body_frame_formula(self) -> None:
         axes_b = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0]], dtype=float)

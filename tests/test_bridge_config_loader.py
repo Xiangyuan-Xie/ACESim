@@ -55,6 +55,20 @@ class BridgeConfigLoaderTests(unittest.TestCase):
         self.assertIsNone(bridge_config.joint_names)
         self.assertEqual(bridge_config.override.input_endpoint, "tcp://172.20.32.1:5603")
 
+    def test_default_bridge_config_includes_px4_controls_and_vehicle_truth_topics(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        config_path = repo_root / "acesim" / "deploy" / "aircraft" / "acesim_ros2" / "config" / "bridges.yaml"
+
+        bridge_configs = self.config_loader.load_bridge_configs(str(config_path))
+        bridge_by_name = {bridge.name: bridge for bridge in bridge_configs}
+
+        self.assertIn("px4_controls", bridge_by_name)
+        self.assertEqual(bridge_by_name["px4_controls"].topic, "/acesim/px4_controls")
+        self.assertEqual(bridge_by_name["px4_controls"].transport.endpoint, "tcp://127.0.0.1:5602")
+        self.assertIn("vehicle_truth", bridge_by_name)
+        self.assertEqual(bridge_by_name["vehicle_truth"].topic, "/acesim/vehicle/odometry")
+        self.assertEqual(bridge_by_name["vehicle_truth"].transport.endpoint, "tcp://127.0.0.1:5605")
+
     def test_load_bridge_configs_rejects_unknown_bridge_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "bridges.yaml"

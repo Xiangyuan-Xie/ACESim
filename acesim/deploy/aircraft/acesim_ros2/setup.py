@@ -26,6 +26,7 @@ setup(
             "acesim_play = acesim_ros2.acesim_play:main",
             "acesim_play_headless = acesim_ros2.acesim_play_headless:main",
             "acesim_bridge = acesim_ros2.acesim_bridge:main",
+            "acesim_ace_follower = acesim_ros2.ace_follower:main",
             "x500_arm2x_benchmark = acesim_ros2.benchmark.x500_arm2x:main",
         ],
     },

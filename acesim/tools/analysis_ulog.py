@@ -246,6 +246,206 @@ def _format_quantiles_ms(values: np.ndarray) -> str:
     return f"p05={p05:.3f} p50={p50:.3f} p95={p95:.3f} p99={p99:.3f} samples={finite.size}"
 
 
+def _robust_sigma(values: np.ndarray) -> float:
+    finite = np.asarray(values, dtype=np.float64)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return float("nan")
+    median = np.median(finite)
+    return float(1.4826 * np.median(np.abs(finite - median)))
+
+
+def _field_values(topic_data: dict[str, np.ndarray], field_name: str) -> np.ndarray:
+    return np.asarray(topic_data.get(field_name, []), dtype=np.float64)
+
+
+def _mask_topic_window(topic_data: dict[str, np.ndarray], start_us: float, end_us: float) -> np.ndarray:
+    timestamps = np.asarray(topic_data.get("timestamp", []), dtype=np.float64)
+    return np.isfinite(timestamps) & (timestamps >= start_us) & (timestamps <= end_us)
+
+
+def _format_toml_array(values: Sequence[float]) -> str:
+    return "[" + ", ".join(f"{float(value):.5g}" for value in values) + "]"
+
+
+def summarize_noise_report(topics: dict[str, dict[str, np.ndarray]]) -> list[str]:
+    """Summarize raw measurement noise evidence and suggest ACESim raw_noise TOML."""
+
+    lines = ["Log-derived raw measurement noise evidence:"]
+    local_position = topics.get("vehicle_local_position")
+    if local_position is None or "timestamp" not in local_position:
+        lines.append("  hover_window_s=insufficient evidence")
+        lines.append("  raw_noise_toml=insufficient evidence")
+        return lines
+
+    timestamps = np.asarray(local_position["timestamp"], dtype=np.float64)
+    if timestamps.size < 2:
+        lines.append("  hover_window_s=insufficient evidence")
+        lines.append("  raw_noise_toml=insufficient evidence")
+        return lines
+
+    first_us = float(timestamps[0])
+    times_s = (timestamps - first_us) * 1e-6
+    z = _field_values(local_position, "z")
+    vx = _field_values(local_position, "vx")
+    vy = _field_values(local_position, "vy")
+    vz = _field_values(local_position, "vz")
+    count = min(timestamps.size, z.size, vx.size, vy.size, vz.size)
+    if count < 2:
+        lines.append("  hover_window_s=insufficient evidence")
+        lines.append("  raw_noise_toml=insufficient evidence")
+        return lines
+    timestamps = timestamps[:count]
+    times_s = times_s[:count]
+    z = z[:count]
+    vx = vx[:count]
+    vy = vy[:count]
+    vz = vz[:count]
+
+    window_s = 5.0
+    best: tuple[float, int, int] | None = None
+    for start_idx, start_s in enumerate(times_s):
+        end_s = start_s + window_s
+        end_idx = int(np.searchsorted(times_s, end_s, side="right"))
+        if end_idx - start_idx < 5:
+            continue
+        z_window = z[start_idx:end_idx]
+        vx_window = vx[start_idx:end_idx]
+        vy_window = vy[start_idx:end_idx]
+        vz_window = vz[start_idx:end_idx]
+        if not np.all(np.isfinite(z_window)):
+            continue
+        median_height_m = -float(np.nanmedian(z_window))
+        if median_height_m < 1.0:
+            continue
+        horizontal_speed = np.hypot(vx_window, vy_window)
+        score = (
+            float(np.nanstd(z_window))
+            + 0.5 * float(np.nanstd(vz_window))
+            + 0.2 * float(np.nanmean(horizontal_speed))
+            + 0.05 * abs(float(np.nanmean(vz_window)))
+        )
+        if best is None or score < best[0]:
+            best = (score, start_idx, end_idx)
+
+    if best is None:
+        lines.append("  hover_window_s=insufficient evidence")
+        lines.append("  raw_noise_toml=insufficient evidence")
+        return lines
+
+    _, start_idx, end_idx = best
+    start_us = float(timestamps[start_idx])
+    end_us = float(timestamps[end_idx - 1])
+    start_s = (start_us - first_us) * 1e-6
+    end_s = (end_us - first_us) * 1e-6
+    selected_horizontal_speed = np.hypot(vx[start_idx:end_idx], vy[start_idx:end_idx])
+    lines.append(
+        f"  hover_window_s={start_s:.6f}..{end_s:.6f} "
+        f"samples={end_idx - start_idx} "
+        f"median_height_m={-float(np.nanmedian(z[start_idx:end_idx])):.3f} "
+        f"mean_abs_vz_mps={float(np.nanmean(np.abs(vz[start_idx:end_idx]))):.4f} "
+        f"mean_horizontal_speed_mps={float(np.nanmean(selected_horizontal_speed)):.4f}"
+    )
+
+    sensor_combined = topics.get("sensor_combined")
+    if sensor_combined is None:
+        lines.append("  raw_imu_robust_sigma=insufficient evidence")
+        lines.append("  raw_noise_toml=insufficient evidence")
+        return lines
+
+    imu_mask = _mask_topic_window(sensor_combined, start_us, end_us)
+    accel_std = [
+        _robust_sigma(_field_values(sensor_combined, f"accelerometer_m_s2[{axis}]")[imu_mask]) for axis in range(3)
+    ]
+    gyro_std = [_robust_sigma(_field_values(sensor_combined, f"gyro_rad[{axis}]")[imu_mask]) for axis in range(3)]
+    if not all(np.isfinite(value) for value in accel_std + gyro_std):
+        lines.append("  raw_imu_robust_sigma=insufficient evidence")
+        lines.append("  raw_noise_toml=insufficient evidence")
+        return lines
+
+    sensor_combined_rate_hz = _recorded_rate_hz(sensor_combined)
+    rate_text = f"{sensor_combined_rate_hz:.3f} Hz" if sensor_combined_rate_hz is not None else "unknown"
+    lines.append(
+        "  raw_imu_robust_sigma evidence=strong "
+        f"rate={rate_text} accel_std_mps2={_format_toml_array(accel_std)} "
+        f"gyro_std_radps={_format_toml_array(gyro_std)}"
+    )
+
+    sensor_mag = topics.get("sensor_mag")
+    mag_std = [0.0, 0.0, 0.0]
+    if sensor_mag is not None:
+        mag_mask = _mask_topic_window(sensor_mag, start_us, end_us)
+        mag_candidates = [_robust_sigma(_field_values(sensor_mag, field)[mag_mask]) for field in ("x", "y", "z")]
+        if all(np.isfinite(value) for value in mag_candidates):
+            mag_std = mag_candidates
+            lines.append(f"  raw_mag_robust_sigma evidence=strong mag_std_gauss={_format_toml_array(mag_std)}")
+        else:
+            lines.append("  raw_mag_robust_sigma evidence=insufficient; suggested TOML uses zeros")
+    else:
+        lines.append("  raw_mag_robust_sigma evidence=insufficient; suggested TOML uses zeros")
+
+    sensor_baro = topics.get("sensor_baro")
+    baro_altitude_std_m = 0.0
+    if sensor_baro is not None:
+        baro_mask = _mask_topic_window(sensor_baro, start_us, end_us)
+        pressure_std_pa = _robust_sigma(_field_values(sensor_baro, "pressure")[baro_mask])
+        if np.isfinite(pressure_std_pa):
+            baro_altitude_std_m = float(pressure_std_pa / 12.0)
+            lines.append(f"  raw_baro_pressure_sigma evidence=strong altitude_std_m={baro_altitude_std_m:.5g}")
+        else:
+            lines.append("  raw_baro_pressure_sigma evidence=insufficient; suggested TOML uses zero")
+    else:
+        lines.append("  raw_baro_pressure_sigma evidence=insufficient; suggested TOML uses zero")
+
+    ev_pos = topics.get("estimator_aid_src_ev_pos")
+    ev_hgt = topics.get("estimator_aid_src_ev_hgt")
+    ev_yaw = topics.get("estimator_aid_src_ev_yaw")
+    vision_position_std = [0.0, 0.0, 0.0]
+    vision_orientation_std = 0.0
+    if ev_pos is not None and ev_hgt is not None:
+        ev_pos_mask = _mask_topic_window(ev_pos, start_us, end_us)
+        ev_hgt_mask = _mask_topic_window(ev_hgt, start_us, end_us)
+        ev_pos_x = _robust_sigma(_field_values(ev_pos, "innovation[0]")[ev_pos_mask])
+        ev_pos_y = _robust_sigma(_field_values(ev_pos, "innovation[1]")[ev_pos_mask])
+        ev_pos_z = _robust_sigma(_field_values(ev_hgt, "innovation")[ev_hgt_mask])
+        if all(np.isfinite(value) for value in (ev_pos_x, ev_pos_y, ev_pos_z)):
+            vision_position_std = [ev_pos_x, ev_pos_y, ev_pos_z]
+            lines.append(
+                "  vision_position_noise evidence=diagnostic_only "
+                f"innovation_sigma_m={_format_toml_array(vision_position_std)}"
+            )
+        else:
+            lines.append("  vision_position_noise evidence=insufficient; suggested TOML uses zeros")
+    else:
+        lines.append("  vision_position_noise evidence=insufficient; suggested TOML uses zeros")
+    if ev_yaw is not None:
+        ev_yaw_mask = _mask_topic_window(ev_yaw, start_us, end_us)
+        yaw_std = _robust_sigma(_field_values(ev_yaw, "innovation")[ev_yaw_mask])
+        if np.isfinite(yaw_std):
+            vision_orientation_std = yaw_std
+            lines.append(f"  vision_orientation_noise evidence=diagnostic_only yaw_sigma_rad={yaw_std:.5g}")
+        else:
+            lines.append("  vision_orientation_noise evidence=insufficient; suggested TOML uses zero")
+    else:
+        lines.append("  vision_orientation_noise evidence=insufficient; suggested TOML uses zero")
+
+    lines.extend(
+        [
+            "  suggested_toml:",
+            "    [params.px4_fusion.raw_noise]",
+            f"    accel_std_mps2 = {_format_toml_array(accel_std)}",
+            f"    gyro_std_radps = {_format_toml_array(gyro_std)}",
+            f"    mag_std_gauss = {_format_toml_array(mag_std)}",
+            f"    baro_altitude_std_m = {baro_altitude_std_m:.5g}",
+            "    gps_position_std_m = 0.0",
+            "    gps_velocity_std_mps = 0.0",
+            f"    vision_position_std_m = {_format_toml_array(vision_position_std)}",
+            f"    vision_orientation_std_rad = {vision_orientation_std:.5g}",
+        ]
+    )
+    return lines
+
+
 def _latest_source_age_values_ms(consumer_timestamps: np.ndarray, source_timestamps: np.ndarray) -> np.ndarray:
     consumers = np.asarray(consumer_timestamps, dtype=np.float64)
     sources = np.asarray(source_timestamps, dtype=np.float64)
@@ -455,6 +655,7 @@ def analyze_log(log_path: Path, output_dir: Path) -> AnalysisResult:
                 controls=controls,
                 px4_timing_evidence=summarize_px4_timing_evidence(timing_topics),
                 delay_report=summarize_delay_report(timing_topics),
+                noise_report=summarize_noise_report(timing_topics),
             )
         )
         + "\n",
@@ -535,6 +736,7 @@ def _summary_lines(
     controls: np.ndarray,
     px4_timing_evidence: Sequence[str] | None = None,
     delay_report: Sequence[str] | None = None,
+    noise_report: Sequence[str] | None = None,
 ) -> list[str]:
     lines = [
         f"ULog: {log_path}",
@@ -581,6 +783,8 @@ def _summary_lines(
         lines.extend(["", *px4_timing_evidence])
     if delay_report is not None:
         lines.extend(["", *delay_report])
+    if noise_report is not None:
+        lines.extend(["", *noise_report])
     return lines
 
 
@@ -654,6 +858,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=project_root() / DEFAULT_OUTPUT_DIR)
     parser.add_argument("--glob", default=DEFAULT_LOG_GLOB, help="Log glob used by the curses picker.")
     parser.add_argument("--delay-report", action="store_true", help="Print timestamp-derived delay evidence to stdout.")
+    parser.add_argument("--noise-report", action="store_true", help="Print raw measurement noise evidence to stdout.")
     return parser.parse_args()
 
 
@@ -666,6 +871,9 @@ def main() -> None:
         if args.delay_report:
             ulog = ULog(str(args.log.resolve()))
             print("\n".join(summarize_delay_report({dataset.name: dataset.data for dataset in ulog.data_list})))
+        if args.noise_report:
+            ulog = ULog(str(args.log.resolve()))
+            print("\n".join(summarize_noise_report({dataset.name: dataset.data for dataset in ulog.data_list})))
         if not result.am_active_detected:
             print("Note: no confirmed AM Position active nav_state was detected in this log.")
         return

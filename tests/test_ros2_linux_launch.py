@@ -95,26 +95,32 @@ def test_linux_launch_defaults_to_legacy_gui_stack() -> None:
 
     description = module.generate_launch_description()
     declared = {action.name: action.default_value for action in description.actions if hasattr(action, "name")}
-    action = module._launch_setup({"px4_repo": "/tmp/px4"})[0]
+    action = module._launch_setup({"px4_repo": "/tmp/px4", "ace_follower": "auto"})[0]
 
     assert "gui" not in declared
     assert "readiness" not in declared
+    assert declared["ace_follower"] == "auto"
     assert action["kind"] == "legacy_launch"
     assert action["px4_repo_path"] == "/tmp/px4"
     assert action["bridge_mode"] == "linux"
     assert action["play_executable"] == "acesim_play"
     assert action["enable_px4_post_start_setup"] is True
+    assert action["ace_follower"] == "auto"
 
 
 def test_linux_headless_launch_defaults_to_legacy_headless_stack() -> None:
     module = _load_launch_module("linux_headless.launch.py")
 
-    action = module._launch_setup({"px4_repo": "/tmp/px4"})[0]
+    description = module.generate_launch_description()
+    declared = {action.name: action.default_value for action in description.actions if hasattr(action, "name")}
+    action = module._launch_setup({"px4_repo": "/tmp/px4", "ace_follower": "false"})[0]
 
+    assert declared["ace_follower"] == "auto"
     assert action["kind"] == "legacy_launch"
     assert action["bridge_mode"] == "linux"
     assert action["play_executable"] == "acesim_play_headless"
     assert action["enable_px4_post_start_setup"] is True
+    assert action["ace_follower"] == "false"
 
 
 def test_wsl_launch_defaults_to_bridge_only_legacy_stack() -> None:

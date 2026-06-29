@@ -31,6 +31,10 @@ def _load_launch_common_module() -> ModuleType:
         "rclpy.qos",
         "rosgraph_msgs",
         "rosgraph_msgs.msg",
+        "std_msgs",
+        "std_msgs.msg",
+        "nav_msgs",
+        "nav_msgs.msg",
         "px4_msgs",
         "px4_msgs.msg",
     ]:
@@ -48,6 +52,10 @@ def _load_launch_common_module() -> ModuleType:
     rclpy_qos_module: Any = types.ModuleType("rclpy.qos")
     rosgraph_msgs_module: Any = types.ModuleType("rosgraph_msgs")
     rosgraph_msgs_msg_module: Any = types.ModuleType("rosgraph_msgs.msg")
+    std_msgs_module: Any = types.ModuleType("std_msgs")
+    std_msgs_msg_module: Any = types.ModuleType("std_msgs.msg")
+    nav_msgs_module: Any = types.ModuleType("nav_msgs")
+    nav_msgs_msg_module: Any = types.ModuleType("nav_msgs.msg")
     px4_msgs_module: Any = types.ModuleType("px4_msgs")
     px4_msgs_msg_module: Any = types.ModuleType("px4_msgs.msg")
 
@@ -114,6 +122,67 @@ def _load_launch_common_module() -> ModuleType:
         def __init__(self) -> None:
             self.clock = _FakeStamp()
 
+    class _FakeHeader:
+        def __init__(self) -> None:
+            self.stamp = _FakeStamp()
+            self.frame_id = ""
+
+    class _Vector3:
+        def __init__(self) -> None:
+            self.x = 0.0
+            self.y = 0.0
+            self.z = 0.0
+
+    class _Quaternion:
+        def __init__(self) -> None:
+            self.x = 0.0
+            self.y = 0.0
+            self.z = 0.0
+            self.w = 1.0
+
+    class _Pose:
+        def __init__(self) -> None:
+            self.position = _Vector3()
+            self.orientation = _Quaternion()
+
+    class _PoseWithCovariance:
+        def __init__(self) -> None:
+            self.pose = _Pose()
+            self.covariance = [0.0] * 36
+
+    class _Twist:
+        def __init__(self) -> None:
+            self.linear = _Vector3()
+            self.angular = _Vector3()
+
+    class _TwistWithCovariance:
+        def __init__(self) -> None:
+            self.twist = _Twist()
+            self.covariance = [0.0] * 36
+
+    class MultiArrayDimension:
+        def __init__(self) -> None:
+            self.label = ""
+            self.size = 0
+            self.stride = 0
+
+    class MultiArrayLayout:
+        def __init__(self) -> None:
+            self.dim: list[MultiArrayDimension] = []
+            self.data_offset = 0
+
+    class Float64MultiArray:
+        def __init__(self) -> None:
+            self.layout = MultiArrayLayout()
+            self.data: list[float] = []
+
+    class Odometry:
+        def __init__(self) -> None:
+            self.header = _FakeHeader()
+            self.child_frame_id = ""
+            self.pose = _PoseWithCovariance()
+            self.twist = _TwistWithCovariance()
+
     class ArmJointState:
         def __init__(self) -> None:
             self.timestamp = 0
@@ -138,6 +207,11 @@ def _load_launch_common_module() -> ModuleType:
     rclpy_qos_module.DurabilityPolicy = _Enum
     rosgraph_msgs_msg_module.Clock = Clock
     rosgraph_msgs_module.msg = rosgraph_msgs_msg_module
+    std_msgs_msg_module.Float64MultiArray = Float64MultiArray
+    std_msgs_msg_module.MultiArrayDimension = MultiArrayDimension
+    std_msgs_module.msg = std_msgs_msg_module
+    nav_msgs_msg_module.Odometry = Odometry
+    nav_msgs_module.msg = nav_msgs_msg_module
     px4_msgs_msg_module.ArmJointState = ArmJointState
     px4_msgs_module.msg = px4_msgs_msg_module
 
@@ -159,6 +233,10 @@ def _load_launch_common_module() -> ModuleType:
     sys.modules["rclpy.qos"] = rclpy_qos_module
     sys.modules["rosgraph_msgs"] = rosgraph_msgs_module
     sys.modules["rosgraph_msgs.msg"] = rosgraph_msgs_msg_module
+    sys.modules["std_msgs"] = std_msgs_module
+    sys.modules["std_msgs.msg"] = std_msgs_msg_module
+    sys.modules["nav_msgs"] = nav_msgs_module
+    sys.modules["nav_msgs.msg"] = nav_msgs_msg_module
     sys.modules["px4_msgs"] = px4_msgs_module
     sys.modules["px4_msgs.msg"] = px4_msgs_msg_module
 
@@ -318,6 +396,43 @@ class ROS2LaunchCommonTests(unittest.TestCase):
         ]
         self.assertEqual(len(bridge_processes), 1)
         self.assertIn("__node:=acesim_bridge", bridge_processes[0].cmd[4])
+
+    def test_build_launch_entities_auto_starts_ace_follower_for_x500_arm2x(self) -> None:
+        with patch.object(self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("x500_arm2x", "am")):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities(
+                    "/tmp/px4",
+                    enable_px4_post_start_setup=False,
+                    ace_follower="auto",
+                )
+
+        follower = self._play_process(entities, "acesim_ace_follower")
+        self.assertIn("ACESIM_ACE_FOLLOWER_COMMAND_ENDPOINT=tcp://0.0.0.0:5604", follower.cmd[4])
+        play = self._play_action(entities, "acesim_play")
+        self.assertEqual(play.kwargs["additional_env"]["ACESIM_ARM_COMMAND_STREAM_ENABLED"], "1")
+        self.assertEqual(play.kwargs["additional_env"]["ACESIM_ARM_COMMAND_STREAM_ENDPOINT"], "tcp://127.0.0.1:5604")
+
+    def test_build_launch_entities_auto_skips_ace_follower_for_plain_x500(self) -> None:
+        with patch.object(self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("x500", "mc")):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities(
+                    "/tmp/px4",
+                    enable_px4_post_start_setup=False,
+                    ace_follower="auto",
+                )
+
+        self.assertFalse(any("acesim_ace_follower" in " ".join(getattr(entity, "cmd", [])) for entity in entities))
+
+    def test_build_launch_entities_false_disables_ace_follower_for_x500_arm2x(self) -> None:
+        with patch.object(self.launch_common, "ConfigLoader", return_value=_FakeConfigLoader("x500_arm2x", "am")):
+            with patch.object(self.launch_common, "PX4SensorParams", _FakePX4SensorParams):
+                entities = self.launch_common.build_launch_entities(
+                    "/tmp/px4",
+                    enable_px4_post_start_setup=False,
+                    ace_follower="false",
+                )
+
+        self.assertFalse(any("acesim_ace_follower" in " ".join(getattr(entity, "cmd", [])) for entity in entities))
 
     def test_default_ros_launch_stack_plan_keeps_full_ros_workflow(self) -> None:
         plan = self.launch_common.build_ros_launch_stack_plan(
@@ -635,7 +750,9 @@ bridges:
             overrides["overrides"],
             {
                 "simulation_clock": {"input_endpoint": "tcp://127.0.0.1:5600"},
+                "px4_controls": {"input_endpoint": "tcp://127.0.0.1:5602"},
                 "arm_state": {"input_endpoint": "tcp://127.0.0.1:5603"},
+                "vehicle_truth": {"input_endpoint": "tcp://127.0.0.1:5605"},
             },
         )
 
@@ -657,7 +774,9 @@ bridges:
             overrides["overrides"],
             {
                 "simulation_clock": {"input_endpoint": "tcp://172.20.32.1:5600"},
+                "px4_controls": {"input_endpoint": "tcp://172.20.32.1:5602"},
                 "arm_state": {"input_endpoint": "tcp://172.20.32.1:5603"},
+                "vehicle_truth": {"input_endpoint": "tcp://172.20.32.1:5605"},
             },
         )
 

@@ -191,6 +191,60 @@ class PX4TransportSchedulerTests(unittest.TestCase):
         self.assertEqual(params.vision_delay_ms, (0.0, 0.0))
         self.assertEqual(actuator_params.actuator_delay_ms, (1.5, 2.5))
 
+    def test_raw_noise_is_parsed_from_asset_params(self) -> None:
+        params = PX4SensorParams.from_asset_params(
+            {
+                "px4_fusion": {
+                    "mode": "mocap",
+                    "mocap": {"hil_sensor_rate_hz": 200.0, "vision_rate_hz": 100.0},
+                    "raw_noise": {
+                        "accel_std_mps2": [0.889, 0.753, 0.673],
+                        "gyro_std_radps": [0.260, 0.043, 0.050],
+                        "mag_std_gauss": [0.0022, 0.0083, 0.0049],
+                        "baro_altitude_std_m": 0.235,
+                        "gps_position_std_m": 0.4,
+                        "gps_velocity_std_mps": 0.2,
+                        "vision_position_std_m": [0.00015, 0.00030, 0.00030],
+                        "vision_orientation_std_rad": 0.0006,
+                    },
+                }
+            },
+            dynamic_hil_sensor_fields=False,
+        )
+
+        self.assertEqual(params.accel_noise_std_mps2, (0.889, 0.753, 0.673))
+        self.assertEqual(params.gyro_noise_std_radps, (0.260, 0.043, 0.050))
+        self.assertEqual(params.mag_noise_std_gauss, (0.0022, 0.0083, 0.0049))
+        self.assertEqual(params.baro_noise_std_m, 0.235)
+        self.assertEqual(params.gps_pos_noise_std_m, 0.4)
+        self.assertEqual(params.gps_vel_noise_std_mps, 0.2)
+        self.assertEqual(params.vision_position_noise_std_m, (0.00015, 0.00030, 0.00030))
+        self.assertEqual(params.vision_orientation_noise_std_rad, 0.0006)
+
+    def test_raw_noise_rejects_invalid_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "raw_noise.accel_std_mps2"):
+            PX4SensorParams.from_asset_params(
+                {
+                    "px4_fusion": {
+                        "mode": "mocap",
+                        "mocap": {},
+                        "raw_noise": {"accel_std_mps2": [0.1, -0.2, 0.3]},
+                    }
+                },
+                dynamic_hil_sensor_fields=False,
+            )
+        with self.assertRaisesRegex(ValueError, "raw_noise.vision_position_std_m"):
+            PX4SensorParams.from_asset_params(
+                {
+                    "px4_fusion": {
+                        "mode": "mocap",
+                        "mocap": {},
+                        "raw_noise": {"vision_position_std_m": [0.1, 0.2]},
+                    }
+                },
+                dynamic_hil_sensor_fields=False,
+            )
+
     def test_delay_ranges_reject_invalid_bounds(self) -> None:
         with self.assertRaisesRegex(ValueError, "hil_sensor_delay_ms"):
             PX4SensorParams.from_asset_params(
@@ -233,6 +287,11 @@ class PX4TransportSchedulerTests(unittest.TestCase):
                 self.assertEqual(float(px4_fusion["hil"]["mag_rate_hz"]), 84.0)
                 self.assertEqual(float(px4_fusion["hil"]["baro_rate_hz"]), 42.0)
                 self.assertEqual(float(px4_fusion["hil"]["gps_rate_hz"]), 5.0)
+                raw_noise = px4_fusion["raw_noise"]
+                self.assertEqual(raw_noise["accel_std_mps2"], [0.889, 0.753, 0.673])
+                self.assertEqual(raw_noise["gyro_std_radps"], [0.260, 0.043, 0.050])
+                self.assertEqual(raw_noise["vision_position_std_m"], [0.00015, 0.00030, 0.00030])
+                self.assertEqual(float(raw_noise["vision_orientation_std_rad"]), 0.0006)
 
     def test_non_x500_mujoco_configs_keep_declared_hil_sensor_rates(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -498,6 +557,92 @@ class PX4TransportSchedulerTests(unittest.TestCase):
         clock.advance_us(3_000)
         scheduler.update()
         self.assertEqual(transport.vision_calls[0]["args"][0], 10_000)
+        clock.close()
+
+    def test_raw_hil_noise_is_applied_to_outgoing_measurement_only(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=200.0,
+            vision_rate_hz=100.0,
+            accel_noise_std_mps2=(1.0, 0.0, 0.0),
+            gyro_noise_std_radps=(0.0, 2.0, 0.0),
+        )
+        accel_truth = np.array([1.0, 2.0, 3.0], dtype=float)
+        gyro_truth = np.array([0.1, 0.2, 0.3], dtype=float)
+
+        def read_sample() -> PX4SensorSample:
+            return PX4SensorSample(
+                accel_frd=accel_truth.copy(),
+                gyro_frd=gyro_truth.copy(),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=np.zeros(3, dtype=float),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=float),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        with patch("acesim.utils.px4_sensor_scheduler.np.random.normal") as normal_mock:
+            normal_mock.side_effect = [
+                np.array([0.5, 0.0, 0.0], dtype=float),
+                np.array([0.0, -0.4, 0.0], dtype=float),
+            ]
+            clock.advance_us(5_000)
+            scheduler.update()
+
+        np.testing.assert_allclose(transport.hil_sensor_calls[0]["accel_frd"], np.array([1.5, 2.0, 3.0]))
+        np.testing.assert_allclose(transport.hil_sensor_calls[0]["gyro_frd"], np.array([0.1, -0.2, 0.3]))
+        np.testing.assert_allclose(accel_truth, np.array([1.0, 2.0, 3.0]))
+        np.testing.assert_allclose(gyro_truth, np.array([0.1, 0.2, 0.3]))
+        clock.close()
+
+    def test_raw_vision_noise_is_queued_with_original_sample_timestamp(self) -> None:
+        clock = SimulationClock()
+        transport = _FakeTransport()
+        params = PX4SensorParams(
+            fusion_mode="mocap",
+            hil_sensor_rate_hz=200.0,
+            vision_rate_hz=100.0,
+            accel_noise_std_mps2=(0.0, 0.0, 0.0),
+            gyro_noise_std_radps=(0.0, 0.0, 0.0),
+            vision_delay_ms=(3.0, 3.0),
+            vision_position_noise_std_m=(0.1, 0.2, 0.3),
+            vision_orientation_noise_std_rad=0.01,
+        )
+        position_truth = np.array([1.0, 2.0, 3.0], dtype=float)
+        quat_truth = np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+
+        def read_sample() -> PX4SensorSample:
+            return PX4SensorSample(
+                accel_frd=np.zeros(3, dtype=float),
+                gyro_frd=np.zeros(3, dtype=float),
+                mag_frd=np.zeros(3, dtype=float),
+                position_world_m=position_truth.copy(),
+                velocity_world_mps=np.zeros(3, dtype=float),
+                attitude_world_quat=quat_truth.copy(),
+            )
+
+        scheduler = PX4SensorScheduler(transport, clock, params, read_sample)
+        with patch("acesim.utils.px4_sensor_scheduler.np.random.normal") as normal_mock:
+            normal_mock.side_effect = [
+                np.array([0.01, -0.02, 0.03], dtype=float),
+                np.array([0.0, 0.0, 0.01], dtype=float),
+            ]
+            clock.advance_us(10_000)
+            scheduler.update()
+
+        self.assertFalse(transport.vision_calls)
+        clock.advance_us(3_000)
+        scheduler.update()
+
+        timestamp_us, position_sent, quat_sent = transport.vision_calls[0]["args"]
+        self.assertEqual(timestamp_us, 10_000)
+        np.testing.assert_allclose(position_sent, np.array([1.01, 1.98, 3.03]))
+        self.assertAlmostEqual(float(np.linalg.norm(quat_sent)), 1.0, places=12)
+        self.assertGreater(Rotation.from_quat(quat_sent, scalar_first=True).magnitude(), 0.0)
+        np.testing.assert_allclose(position_truth, np.array([1.0, 2.0, 3.0]))
+        np.testing.assert_allclose(quat_truth, np.array([1.0, 0.0, 0.0, 0.0]))
         clock.close()
 
     @patch("acesim.utils.px4_transport.mavutil.mavlink_connection")

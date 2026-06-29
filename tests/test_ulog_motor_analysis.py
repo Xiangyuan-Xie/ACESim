@@ -9,6 +9,7 @@ from acesim.tools.analysis_ulog import (
     run_tui,
     summarize_delay_report,
     summarize_motor_window,
+    summarize_noise_report,
     summarize_px4_timing_evidence,
 )
 
@@ -143,6 +144,61 @@ def test_summarize_delay_report_warns_for_legacy_am35_observation() -> None:
 
     assert any("am_policy_observation_dim=35" in line for line in lines)
     assert any("legacy observation dimension" in line for line in lines)
+
+
+def test_summarize_noise_report_outputs_raw_noise_toml_from_hover_window() -> None:
+    timestamps = np.arange(0, 6_000_000, 5_000, dtype=np.uint64)
+    seconds = timestamps.astype(float) / 1e6
+    topics = {
+        "sensor_combined": {
+            "timestamp": timestamps,
+            "gyro_rad[0]": np.sin(seconds) * 0.1,
+            "gyro_rad[1]": np.cos(seconds) * 0.2,
+            "gyro_rad[2]": np.sin(seconds * 0.5) * 0.3,
+            "accelerometer_m_s2[0]": np.sin(seconds * 2.0) * 0.4,
+            "accelerometer_m_s2[1]": np.cos(seconds * 2.0) * 0.5,
+            "accelerometer_m_s2[2]": -9.81 + np.sin(seconds * 3.0) * 0.6,
+        },
+        "vehicle_local_position": {
+            "timestamp": np.arange(0, 6_000_000, 100_000, dtype=np.uint64),
+            "x": np.zeros(60),
+            "y": np.zeros(60),
+            "z": -1.4 + np.sin(np.arange(60) * 0.1) * 0.002,
+            "vx": np.zeros(60),
+            "vy": np.zeros(60),
+            "vz": np.zeros(60),
+        },
+        "estimator_aid_src_ev_pos": {
+            "timestamp": np.arange(0, 6_000_000, 500_000, dtype=np.uint64),
+            "innovation[0]": np.array([0.0, 0.0001, -0.0001] * 4),
+            "innovation[1]": np.array([0.0, 0.0002, -0.0002] * 4),
+        },
+        "estimator_aid_src_ev_hgt": {
+            "timestamp": np.arange(0, 6_000_000, 500_000, dtype=np.uint64),
+            "innovation": np.array([0.0, 0.0003, -0.0003] * 4),
+        },
+        "estimator_aid_src_ev_yaw": {
+            "timestamp": np.arange(0, 6_000_000, 500_000, dtype=np.uint64),
+            "innovation": np.array([0.0, 0.0006, -0.0006] * 4),
+        },
+    }
+
+    joined = "\n".join(summarize_noise_report(topics))
+
+    assert "Log-derived raw measurement noise evidence:" in joined
+    assert "hover_window_s=" in joined
+    assert "[params.px4_fusion.raw_noise]" in joined
+    assert "accel_std_mps2 = [" in joined
+    assert "gyro_std_radps = [" in joined
+    assert "vision_position_std_m = [" in joined
+    assert "vision_orientation_std_rad =" in joined
+
+
+def test_summarize_noise_report_marks_missing_topics_as_insufficient() -> None:
+    joined = "\n".join(summarize_noise_report({}))
+
+    assert "hover_window_s=insufficient evidence" in joined
+    assert "raw_noise_toml=insufficient evidence" in joined
 
 
 def test_format_log_row_shows_only_filename_and_modified_date(tmp_path) -> None:

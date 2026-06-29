@@ -74,6 +74,12 @@ def test_acesim_ros2_exposes_x500_arm2x_benchmark_console_script() -> None:
     assert "x500_arm2x_benchmark = acesim_ros2.benchmark.x500_arm2x:main" in setup_py.read_text()
 
 
+def test_acesim_ros2_exposes_ace_follower_console_script() -> None:
+    setup_py = ROOT / "acesim/deploy/aircraft/acesim_ros2/setup.py"
+
+    assert "acesim_ace_follower = acesim_ros2.ace_follower:main" in setup_py.read_text()
+
+
 def test_acesim_ros2_does_not_keep_legacy_x500_arm2x_benchmark_module() -> None:
     legacy_module = ROOT / "acesim/deploy/aircraft/acesim_ros2/acesim_ros2/x500_arm2x_benchmark.py"
 

@@ -228,8 +228,10 @@ def build_launch_entities(
     enable_px4_post_start_setup: bool = True,
     play_start_delay_sec: float = 0.0,
     px4_post_start_readiness_mode: Literal["background", "wait", "off"] = "background",
+    ace_follower: Literal["auto", "true", "false"] = "auto",
 ):
-    px4_additional_env = build_px4_additional_env()
+    config_loader = ConfigLoader()
+    px4_additional_env = build_px4_additional_env(config_loader)
     config_file = bridge_config_path()
     bridge_entries = load_bridge_entries(config_file)
     bridge_host = resolve_bridge_host(bridge_mode)
@@ -246,6 +248,20 @@ def build_launch_entities(
         overrides_file = handle.name
     finally:
         handle.close()
+    if ace_follower == "true":
+        start_ace_follower = play_executable is not None
+    elif ace_follower == "false":
+        start_ace_follower = False
+    elif ace_follower == "auto":
+        start_ace_follower = play_executable is not None and (
+            config_loader.get_env_type() == "am" or config_loader.get_asset_name() == "x500_arm2x"
+        )
+    else:
+        raise ValueError("ace_follower must be 'auto', 'true', or 'false'")
+    if start_ace_follower:
+        additional_play_env = dict(additional_play_env or {})
+        additional_play_env.setdefault("ACESIM_ARM_COMMAND_STREAM_ENABLED", "1")
+        additional_play_env.setdefault("ACESIM_ARM_COMMAND_STREAM_ENDPOINT", f"tcp://{bridge_host}:5604")
     entities = [
         ExecuteProcess(cmd=build_graceful_shutdown_command("MicroXRCEAgent udp4 -p 8888"), output="screen"),
         ExecuteProcess(
@@ -272,6 +288,20 @@ def build_launch_entities(
             emulate_tty=True,
         ),
     ]
+    if start_ace_follower:
+        entities.append(
+            ExecuteProcess(
+                cmd=build_graceful_shutdown_command(
+                    build_python_module_run_command(
+                        "acesim_ros2",
+                        "acesim_ace_follower",
+                        {"ACESIM_ACE_FOLLOWER_COMMAND_ENDPOINT": "tcp://0.0.0.0:5604"},
+                    )
+                ),
+                output="screen",
+                emulate_tty=True,
+            )
+        )
 
     acesim_play = build_play_action(play_executable, additional_play_env) if play_executable else None
     px4_post_start_setup = None

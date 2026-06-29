@@ -1,13 +1,16 @@
 [params]
 rotor_direction = [1.0, 1.0, -1.0, -1.0]
-motor_constant = 1.22949e-05
-moment_constant = 0.0140363
+motor_constant = 1.2108824692304194e-05
+moment_constant = 0.014363125015663197
 rotor_drag_coeff = 8.06428e-05
 rolling_moment_coeff = 1e-06
 time_constant_up = 0.0125
 time_constant_down = 0.025
-max_rot_velocity = 1032.2
+max_rot_velocity = 1032.2226262144864
 rotor_radius = 0.127
+
+[params.throttle_to_omega]
+coefficients = [0.0, 1.3883712147882463, -0.3866198458183226]
 
 [params.lumped_drag]
 enabled = true
@@ -53,7 +56,27 @@ hil_sensor_delay_ms = [0.0, 0.0]
 vision_delay_ms = [0.0, 0.0]
 actuator_delay_ms = [0.0, 0.0]
 
+[params.px4_fusion.raw_noise]
+accel_std_mps2 = [0.889, 0.753, 0.673]
+gyro_std_radps = [0.260, 0.043, 0.050]
+mag_std_gauss = [0.0022, 0.0083, 0.0049]
+baro_altitude_std_m = 0.235
+gps_position_std_m = 0.0
+gps_velocity_std_mps = 0.0
+vision_position_std_m = [0.00015, 0.00030, 0.00030]
+vision_orientation_std_rad = 0.0006
+
+[params.control_stream]
+enabled = true
+max_channels = 8
+zmq_endpoint = "tcp://0.0.0.0:5602"
+
 [params.visual_stream]
 enabled = true
 rate_hz = 120.0
 zmq_endpoint = "tcp://0.0.0.0:5601"
+
+[params.truth_stream]
+enabled = true
+rate_hz = 120.0
+zmq_endpoint = "tcp://0.0.0.0:5605"

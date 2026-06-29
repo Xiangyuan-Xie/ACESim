@@ -7,6 +7,8 @@ from typing import Any
 
 from ros2_bridge_testbed import load_bridge_package_module
 
+from acesim.utils.sim_streams import ControlStreamCodec, VehicleTruthCodec
+
 
 def _load_runtime_module() -> ModuleType:
     return load_bridge_package_module("_test_acesim_ros2_runtime", "bridge/runtime.py")
@@ -106,6 +108,76 @@ class BridgeRuntimeTests(unittest.TestCase):
 
         host.close()
         self.assertTrue(self.runtime.zmq._last_socket.closed)
+
+    def test_px4_controls_bridge_publishes_float64_multi_array(self) -> None:
+        node = _FakeNode()
+        bridge_config = self.config_loader.BridgeConfig(
+            name="px4_controls",
+            enabled=True,
+            poll_period_sec=0.005,
+            transport=self.config_loader.TransportConfig(type="zmq_sub", endpoint="tcp://127.0.0.1:5602"),
+            topic="/acesim/px4_controls",
+        )
+
+        host = self.runtime.BridgeHost(node, [bridge_config], self.plugin_registry.PLUGIN_REGISTRY)
+        runtime = host._bridge_runtimes[0]
+        runtime.process_payload(ControlStreamCodec.pack(42_000, [0.0, 0.25, 0.5, 1.0]))
+
+        publisher = next(publisher for publisher in node.publishers if publisher.topic == "/acesim/px4_controls")
+        message = publisher.messages[0]
+        self.assertEqual(message.data, [0.0, 0.25, 0.5, 1.0])
+        self.assertEqual(len(message.layout.dim), 1)
+        self.assertEqual(message.layout.dim[0].label, "channel")
+        self.assertEqual(message.layout.dim[0].size, 4)
+        self.assertEqual(message.layout.dim[0].stride, 4)
+
+        host.close()
+
+    def test_vehicle_truth_bridge_publishes_odometry_message(self) -> None:
+        node = _FakeNode()
+        bridge_config = self.config_loader.BridgeConfig(
+            name="vehicle_truth",
+            enabled=True,
+            poll_period_sec=0.005,
+            transport=self.config_loader.TransportConfig(type="zmq_sub", endpoint="tcp://127.0.0.1:5605"),
+            topic="/acesim/vehicle/odometry",
+        )
+
+        host = self.runtime.BridgeHost(node, [bridge_config], self.plugin_registry.PLUGIN_REGISTRY)
+        runtime = host._bridge_runtimes[0]
+        runtime.process_payload(
+            VehicleTruthCodec.pack(
+                42_000,
+                [1.0, 2.0, 3.0],
+                [1.0, 0.0, 0.0, 0.0],
+                [4.0, 5.0, 6.0],
+                [0.7, 0.8, 0.9],
+            )
+        )
+
+        publisher = next(publisher for publisher in node.publishers if publisher.topic == "/acesim/vehicle/odometry")
+        message = publisher.messages[0]
+        self.assertEqual(message.header.stamp.sec, 0)
+        self.assertEqual(message.header.stamp.nanosec, 42_000_000)
+        self.assertEqual(message.header.frame_id, "acesim_world_nwu")
+        self.assertEqual(message.child_frame_id, "base_link_flu")
+        self.assertEqual(message.pose.pose.position.x, 1.0)
+        self.assertEqual(message.pose.pose.position.y, 2.0)
+        self.assertEqual(message.pose.pose.position.z, 3.0)
+        self.assertEqual(message.pose.pose.orientation.w, 1.0)
+        self.assertEqual(message.pose.pose.orientation.x, 0.0)
+        self.assertEqual(message.pose.pose.orientation.y, 0.0)
+        self.assertEqual(message.pose.pose.orientation.z, 0.0)
+        self.assertEqual(message.twist.twist.linear.x, 4.0)
+        self.assertEqual(message.twist.twist.linear.y, 5.0)
+        self.assertEqual(message.twist.twist.linear.z, 6.0)
+        self.assertEqual(message.twist.twist.angular.x, 0.7)
+        self.assertEqual(message.twist.twist.angular.y, 0.8)
+        self.assertEqual(message.twist.twist.angular.z, 0.9)
+        self.assertEqual(message.pose.covariance, [0.0] * 36)
+        self.assertEqual(message.twist.covariance, [0.0] * 36)
+
+        host.close()
 
 
 if __name__ == "__main__":

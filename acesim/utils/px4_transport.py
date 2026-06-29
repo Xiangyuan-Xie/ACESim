@@ -20,6 +20,14 @@ from acesim.utils.delay import parse_delay_range_ms
 
 FloatArray: TypeAlias = NDArray[np.float64]
 
+DEFAULT_ACCEL_NOISE_STD_MPS2 = (0.00637, 0.00637, 0.00686)
+DEFAULT_GYRO_NOISE_STD_RADPS = 0.0008726646
+DEFAULT_MAG_NOISE_STD_GAUSS = 0.003
+DEFAULT_BARO_NOISE_STD_M = 0.25
+DEFAULT_GPS_POS_NOISE_STD_M = 0.01
+DEFAULT_GPS_VEL_NOISE_STD_MPS = 0.1
+ZERO_VEC3 = (0.0, 0.0, 0.0)
+
 
 @dataclass(frozen=True)
 class PX4ActuatorParams:
@@ -51,12 +59,14 @@ class PX4SensorParams:
     baro_rate_hz: float = 50.0
     gps_rate_hz: float = 30.0
     vision_rate_hz: float = 100.0
-    accel_noise_std_mps2: tuple[float, float, float] = (0.00637, 0.00637, 0.00686)
-    gyro_noise_std_radps: float = 0.0008726646
-    mag_noise_std_gauss: float = 0.003
-    baro_noise_std_m: float = 0.25
-    gps_pos_noise_std_m: float = 0.01
-    gps_vel_noise_std_mps: float = 0.1
+    accel_noise_std_mps2: tuple[float, float, float] = DEFAULT_ACCEL_NOISE_STD_MPS2
+    gyro_noise_std_radps: float | tuple[float, float, float] = DEFAULT_GYRO_NOISE_STD_RADPS
+    mag_noise_std_gauss: float | tuple[float, float, float] = DEFAULT_MAG_NOISE_STD_GAUSS
+    baro_noise_std_m: float = DEFAULT_BARO_NOISE_STD_M
+    gps_pos_noise_std_m: float = DEFAULT_GPS_POS_NOISE_STD_M
+    gps_vel_noise_std_mps: float = DEFAULT_GPS_VEL_NOISE_STD_MPS
+    vision_position_noise_std_m: tuple[float, float, float] = ZERO_VEC3
+    vision_orientation_noise_std_rad: float = 0.0
     dynamic_hil_sensor_fields: bool = False
     ekf2_ev_ctrl: int = 11
     ekf2_hgt_ref: str = "Vision"
@@ -86,6 +96,14 @@ class PX4SensorParams:
             raise ValueError("vision_rate_hz must be positive when vision streaming is enabled")
         if len(self.ekf2_ev_pos_body_m) != 3:
             raise ValueError("ekf2_ev_pos_body_m must contain exactly three values")
+        self._validate_noise_std("accel_noise_std_mps2", self.accel_noise_std_mps2)
+        self._validate_noise_std("gyro_noise_std_radps", self.gyro_noise_std_radps)
+        self._validate_noise_std("mag_noise_std_gauss", self.mag_noise_std_gauss)
+        self._validate_noise_std("baro_noise_std_m", self.baro_noise_std_m)
+        self._validate_noise_std("gps_pos_noise_std_m", self.gps_pos_noise_std_m)
+        self._validate_noise_std("gps_vel_noise_std_mps", self.gps_vel_noise_std_mps)
+        self._validate_noise_std("vision_position_noise_std_m", self.vision_position_noise_std_m)
+        self._validate_noise_std("vision_orientation_noise_std_rad", self.vision_orientation_noise_std_rad)
         parse_delay_range_ms(self.hil_sensor_delay_ms, "hil_sensor_delay_ms")
         parse_delay_range_ms(self.vision_delay_ms, "vision_delay_ms")
 
@@ -116,6 +134,47 @@ class PX4SensorParams:
             raise ValueError(f"{field_name} must contain exactly three values")
         return (values[0], values[1], values[2])
 
+    @staticmethod
+    def _validate_noise_std(field_name: str, value: object) -> None:
+        if isinstance(value, bool):
+            raise ValueError(f"{field_name} must be a non-negative finite number or 3D vector")
+        if isinstance(value, (int, float)):
+            scalar = float(value)
+            if not np.isfinite(scalar) or scalar < 0.0:
+                raise ValueError(f"{field_name} must be a non-negative finite number or 3D vector")
+            return
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            raise ValueError(f"{field_name} must be a non-negative finite number or 3D vector")
+        values = tuple(float(item) for item in value)
+        if len(values) != 3 or any((not np.isfinite(item)) or item < 0.0 for item in values):
+            raise ValueError(f"{field_name} must be a non-negative finite number or 3D vector")
+
+    @staticmethod
+    def _parse_raw_noise_vec3(
+        config: Mapping[str, Any],
+        key: str,
+        default: Sequence[float],
+    ) -> tuple[float, float, float]:
+        field_name = f"raw_noise.{key}"
+        value = config.get(key, default)
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            raise ValueError(f"{field_name} must contain exactly three non-negative finite values")
+        values = tuple(float(item) for item in value)
+        if len(values) != 3 or any((not np.isfinite(item)) or item < 0.0 for item in values):
+            raise ValueError(f"{field_name} must contain exactly three non-negative finite values")
+        return (values[0], values[1], values[2])
+
+    @staticmethod
+    def _parse_raw_noise_scalar(config: Mapping[str, Any], key: str, default: float) -> float:
+        field_name = f"raw_noise.{key}"
+        value = config.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{field_name} must be a non-negative finite number")
+        scalar = float(value)
+        if not np.isfinite(scalar) or scalar < 0.0:
+            raise ValueError(f"{field_name} must be a non-negative finite number")
+        return scalar
+
     @classmethod
     def from_asset_params(
         cls,
@@ -144,6 +203,47 @@ class PX4SensorParams:
         mode = str(px4_fusion.get("mode", "hil"))
         mode_config = get_optional_table(px4_fusion, mode)
         delay_config = get_optional_table(px4_fusion, "delay")
+        raw_noise_config = get_optional_table(px4_fusion, "raw_noise")
+        accel_noise_std_mps2 = cls._parse_raw_noise_vec3(
+            raw_noise_config,
+            "accel_std_mps2",
+            DEFAULT_ACCEL_NOISE_STD_MPS2,
+        )
+        gyro_noise_std_radps = cls._parse_raw_noise_vec3(
+            raw_noise_config,
+            "gyro_std_radps",
+            (DEFAULT_GYRO_NOISE_STD_RADPS,) * 3,
+        )
+        mag_noise_std_gauss = cls._parse_raw_noise_vec3(
+            raw_noise_config,
+            "mag_std_gauss",
+            (DEFAULT_MAG_NOISE_STD_GAUSS,) * 3,
+        )
+        baro_noise_std_m = cls._parse_raw_noise_scalar(
+            raw_noise_config,
+            "baro_altitude_std_m",
+            DEFAULT_BARO_NOISE_STD_M,
+        )
+        gps_pos_noise_std_m = cls._parse_raw_noise_scalar(
+            raw_noise_config,
+            "gps_position_std_m",
+            DEFAULT_GPS_POS_NOISE_STD_M,
+        )
+        gps_vel_noise_std_mps = cls._parse_raw_noise_scalar(
+            raw_noise_config,
+            "gps_velocity_std_mps",
+            DEFAULT_GPS_VEL_NOISE_STD_MPS,
+        )
+        vision_position_noise_std_m = cls._parse_raw_noise_vec3(
+            raw_noise_config,
+            "vision_position_std_m",
+            ZERO_VEC3,
+        )
+        vision_orientation_noise_std_rad = cls._parse_raw_noise_scalar(
+            raw_noise_config,
+            "vision_orientation_std_rad",
+            0.0,
+        )
         hil_sensor_delay_ms = parse_delay_range_ms(
             delay_config.get("hil_sensor_delay_ms", (0.0, 0.0)),
             "hil_sensor_delay_ms",
@@ -165,6 +265,14 @@ class PX4SensorParams:
                 gps_rate_hz=float(mode_config.get("gps_rate_hz", 30.0)),
                 hil_sensor_delay_ms=hil_sensor_delay_ms,
                 vision_delay_ms=vision_delay_ms,
+                accel_noise_std_mps2=accel_noise_std_mps2,
+                gyro_noise_std_radps=gyro_noise_std_radps,
+                mag_noise_std_gauss=mag_noise_std_gauss,
+                baro_noise_std_m=baro_noise_std_m,
+                gps_pos_noise_std_m=gps_pos_noise_std_m,
+                gps_vel_noise_std_mps=gps_vel_noise_std_mps,
+                vision_position_noise_std_m=vision_position_noise_std_m,
+                vision_orientation_noise_std_rad=vision_orientation_noise_std_rad,
             )
         if mode == "mocap":
             ev_pos_body_m = cls._parse_vec3(
@@ -191,6 +299,14 @@ class PX4SensorParams:
                 ekf2_mag_type=int(mode_config.get("ekf2_mag_type", 0)),
                 hil_sensor_delay_ms=hil_sensor_delay_ms,
                 vision_delay_ms=vision_delay_ms,
+                accel_noise_std_mps2=accel_noise_std_mps2,
+                gyro_noise_std_radps=gyro_noise_std_radps,
+                mag_noise_std_gauss=mag_noise_std_gauss,
+                baro_noise_std_m=baro_noise_std_m,
+                gps_pos_noise_std_m=gps_pos_noise_std_m,
+                gps_vel_noise_std_mps=gps_vel_noise_std_mps,
+                vision_position_noise_std_m=vision_position_noise_std_m,
+                vision_orientation_noise_std_rad=vision_orientation_noise_std_rad,
             )
         raise ValueError(f"Unsupported px4_fusion mode: {mode}")
 

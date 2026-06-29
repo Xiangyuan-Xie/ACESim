@@ -17,6 +17,7 @@ from acesim.utils.dynamics import (
     LumpedDragParams,
     RotorFlowParams,
     RotorInertialTorqueParams,
+    ThrottleToOmegaParams,
     first_order_response_step,
     rotor_thrust_moment_along_axis,
 )
@@ -32,6 +33,7 @@ class MCParams:
     rotor_direction: np.ndarray
     motor_constant: float
     moment_constant: float
+    throttle_to_omega: ThrottleToOmegaParams
     rotor_drag_coeff: float
     rolling_moment_coeff: float
     rotor_radius: float
@@ -52,6 +54,7 @@ class MCEnv(PX4MJEnv):
             rotor_direction=np.array(config["rotor_direction"], dtype=float),
             motor_constant=float(config["motor_constant"]),
             moment_constant=float(config["moment_constant"]),
+            throttle_to_omega=ThrottleToOmegaParams.from_config(config.get("throttle_to_omega")),
             rotor_drag_coeff=float(config["rotor_drag_coeff"]),
             rolling_moment_coeff=float(config["rolling_moment_coeff"]),
             rotor_radius=float(config["rotor_radius"]),
@@ -136,7 +139,8 @@ class MCEnv(PX4MJEnv):
 
     def _handle_applied_actuator_controls(self, controls: np.ndarray) -> None:
         self._applied_actuator_controls = np.clip(np.asarray(controls, dtype=float), 0.0, 1.0)
-        self._desired_rotor_angular_velocity = self._applied_actuator_controls * self._params.max_rot_velocity
+        omega_fraction = self._params.throttle_to_omega.evaluate(self._applied_actuator_controls)
+        self._desired_rotor_angular_velocity = omega_fraction * self._params.max_rot_velocity
 
     def _update_rotor_speed_state(self, dt_s: float) -> None:
         previous = self._rotor_angular_velocity.copy()

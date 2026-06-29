@@ -6,6 +6,13 @@ bridges:
       type: zmq_sub
       endpoint: tcp://127.0.0.1:5600
     topic: /acesim/clock
+  px4_controls:
+    enabled: true
+    poll_period_sec: 0.001
+    transport:
+      type: zmq_sub
+      endpoint: tcp://127.0.0.1:5602
+    topic: /acesim/px4_controls
   arm_state:
     enabled: true
     poll_period_sec: 0.001
@@ -13,3 +20,10 @@ bridges:
       type: zmq_sub
       endpoint: tcp://127.0.0.1:5603
     topic: /fmu/in/arm_joint_state
+  vehicle_truth:
+    enabled: true
+    poll_period_sec: 0.001
+    transport:
+      type: zmq_sub
+      endpoint: tcp://127.0.0.1:5605
+    topic: /acesim/vehicle/odometry

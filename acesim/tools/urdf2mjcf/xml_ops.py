@@ -24,7 +24,7 @@ def inject_xml(parent: ET.Element, xml_content: str, index: int = -1, *, source:
             index += 1
 
 
-def add_collision_exclusions(root: ET.Element) -> None:
+def add_collision_exclusions(root: ET.Element, extra_pairs: tuple[tuple[str, str], ...] = ()) -> None:
     contact = root.find("contact")
     if contact is None:
         contact = ET.Element("contact")
@@ -71,3 +71,12 @@ def add_collision_exclusions(root: ET.Element) -> None:
     if worldbody is not None:
         for child in worldbody.findall("body"):
             traverse(child)
+
+    for body1, body2 in extra_pairs:
+        pair = tuple(sorted((body1, body2)))
+        if pair in existing_excludes:
+            continue
+        exclude_elem = ET.SubElement(contact, "exclude")
+        exclude_elem.set("body1", body1)
+        exclude_elem.set("body2", body2)
+        existing_excludes.add(pair)

@@ -33,8 +33,10 @@ from acesim.utils.math import calculate_coupled_gripper_positions
 PX4_MAVLINK_URL = "udpin:0.0.0.0:14540"
 DEFAULT_CLOCK_ZMQ_PORT = 5600
 DEFAULT_VISUAL_ZMQ_PORT = 5601
+DEFAULT_CONTROL_ZMQ_PORT = 5602
 DEFAULT_ARM_STATE_ZMQ_PORT = 5603
 DEFAULT_ARM_COMMAND_ZMQ_PORT = 5604
+DEFAULT_TRUTH_ZMQ_PORT = 5605
 DEFAULT_XRCE_PORT = 8888
 DEFAULT_ROS_DOMAIN_ID = 80
 CONTROLLER_VARIANTS = ("am", "px4_position")
@@ -60,7 +62,7 @@ ARM_JOINT_LIMITS: tuple[tuple[float, float], ...] = (
     (-3.1416, 3.1416),
     (-1.723, 0.0),
     (-0.04225, 0.0),
-    (0.0, 0.04225),
+    (-0.04225, 0.0),
 )
 
 
@@ -134,8 +136,10 @@ class BenchmarkIsolationConfig:
     xrce_port: int
     clock_zmq_endpoint: str
     visual_zmq_endpoint: str
+    control_zmq_endpoint: str
     arm_state_zmq_endpoint: str
     arm_command_zmq_endpoint: str
+    truth_zmq_endpoint: str
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -445,10 +449,12 @@ def _default_isolation(slot: int, runtime_config: BenchmarkRuntimeConfig) -> Ben
         xrce_port=int(runtime_config.xrce_port_base) + int(slot),
         clock_zmq_endpoint=f"tcp://0.0.0.0:{zmq_base}",
         visual_zmq_endpoint=f"tcp://0.0.0.0:{zmq_base + (DEFAULT_VISUAL_ZMQ_PORT - DEFAULT_CLOCK_ZMQ_PORT)}",
+        control_zmq_endpoint=f"tcp://0.0.0.0:{zmq_base + (DEFAULT_CONTROL_ZMQ_PORT - DEFAULT_CLOCK_ZMQ_PORT)}",
         arm_state_zmq_endpoint=f"tcp://0.0.0.0:{zmq_base + (DEFAULT_ARM_STATE_ZMQ_PORT - DEFAULT_CLOCK_ZMQ_PORT)}",
         arm_command_zmq_endpoint=(
             f"tcp://127.0.0.1:{zmq_base + (DEFAULT_ARM_COMMAND_ZMQ_PORT - DEFAULT_CLOCK_ZMQ_PORT)}"
         ),
+        truth_zmq_endpoint=f"tcp://0.0.0.0:{zmq_base + (DEFAULT_TRUTH_ZMQ_PORT - DEFAULT_CLOCK_ZMQ_PORT)}",
     )
 
 
@@ -1359,7 +1365,9 @@ class ManagedBenchmarkStack:
             bridge_host,
             {
                 "simulation_clock": self._isolation.clock_zmq_endpoint,
+                "px4_controls": self._isolation.control_zmq_endpoint,
                 "arm_state": self._isolation.arm_state_zmq_endpoint,
+                "vehicle_truth": self._isolation.truth_zmq_endpoint,
             },
         )
         bridge_overrides_path.write_text(yaml.safe_dump(overrides, sort_keys=False), encoding="utf-8")
@@ -1373,9 +1381,12 @@ class ManagedBenchmarkStack:
             "ACESIM_PX4_SIM_TCP_PORT": str(self._isolation.px4_sim_tcp_port),
             "ACESIM_CLOCK_ZMQ_ENDPOINT": self._isolation.clock_zmq_endpoint,
             "ACESIM_VISUAL_ZMQ_ENDPOINT": self._isolation.visual_zmq_endpoint,
+            "ACESIM_CONTROL_ZMQ_ENDPOINT": self._isolation.control_zmq_endpoint,
             "ACESIM_ARM_STATE_ZMQ_ENDPOINT": self._isolation.arm_state_zmq_endpoint,
+            "ACESIM_TRUTH_ZMQ_ENDPOINT": self._isolation.truth_zmq_endpoint,
             "ACESIM_ARM_COMMAND_ENDPOINT": self._isolation.arm_command_zmq_endpoint,
             "ACESIM_ARM_COMMAND_ONLY": "1",
+            "ACESIM_ARM_COMMAND_STREAM_ENABLED": "0",
         }
         px4_env.update(
             {

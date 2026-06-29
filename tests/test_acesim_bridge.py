@@ -15,6 +15,8 @@ from unittest.mock import patch
 
 def _load_acesim_bridge_module() -> ModuleType:
     module_name = "_test_acesim_ros2_acesim_bridge"
+    for name in [name for name in sys.modules if name == "acesim_ros2" or name.startswith("acesim_ros2.")]:
+        sys.modules.pop(name, None)
     for name in [
         module_name,
         "ament_index_python",
@@ -27,9 +29,12 @@ def _load_acesim_bridge_module() -> ModuleType:
         "rosgraph_msgs.msg",
         "sensor_msgs",
         "sensor_msgs.msg",
+        "std_msgs",
+        "std_msgs.msg",
+        "nav_msgs",
+        "nav_msgs.msg",
         "px4_msgs",
         "px4_msgs.msg",
-        "acesim_ros2",
     ]:
         sys.modules.pop(name, None)
 
@@ -43,6 +48,10 @@ def _load_acesim_bridge_module() -> ModuleType:
     rosgraph_msgs_msg_module = types.ModuleType("rosgraph_msgs.msg")
     sensor_msgs_module = types.ModuleType("sensor_msgs")
     sensor_msgs_msg_module = types.ModuleType("sensor_msgs.msg")
+    std_msgs_module = types.ModuleType("std_msgs")
+    std_msgs_msg_module = types.ModuleType("std_msgs.msg")
+    nav_msgs_module = types.ModuleType("nav_msgs")
+    nav_msgs_msg_module = types.ModuleType("nav_msgs.msg")
     px4_msgs_module = types.ModuleType("px4_msgs")
     px4_msgs_msg_module = types.ModuleType("px4_msgs.msg")
 
@@ -54,6 +63,40 @@ def _load_acesim_bridge_module() -> ModuleType:
     class _FakeHeader:
         def __init__(self) -> None:
             self.stamp = _FakeStamp()
+            self.frame_id = ""
+
+    class _Vector3:
+        def __init__(self) -> None:
+            self.x = 0.0
+            self.y = 0.0
+            self.z = 0.0
+
+    class _Quaternion:
+        def __init__(self) -> None:
+            self.x = 0.0
+            self.y = 0.0
+            self.z = 0.0
+            self.w = 1.0
+
+    class _Pose:
+        def __init__(self) -> None:
+            self.position = _Vector3()
+            self.orientation = _Quaternion()
+
+    class _PoseWithCovariance:
+        def __init__(self) -> None:
+            self.pose = _Pose()
+            self.covariance = [0.0] * 36
+
+    class _Twist:
+        def __init__(self) -> None:
+            self.linear = _Vector3()
+            self.angular = _Vector3()
+
+    class _TwistWithCovariance:
+        def __init__(self) -> None:
+            self.twist = _Twist()
+            self.covariance = [0.0] * 36
 
     class Clock:
         def __init__(self) -> None:
@@ -66,6 +109,29 @@ def _load_acesim_bridge_module() -> ModuleType:
             self.position: list[float] = []
             self.velocity: list[float] = []
             self.effort: list[float] = []
+
+    class MultiArrayDimension:
+        def __init__(self) -> None:
+            self.label = ""
+            self.size = 0
+            self.stride = 0
+
+    class MultiArrayLayout:
+        def __init__(self) -> None:
+            self.dim: list[MultiArrayDimension] = []
+            self.data_offset = 0
+
+    class Float64MultiArray:
+        def __init__(self) -> None:
+            self.layout = MultiArrayLayout()
+            self.data: list[float] = []
+
+    class Odometry:
+        def __init__(self) -> None:
+            self.header = _FakeHeader()
+            self.child_frame_id = ""
+            self.pose = _PoseWithCovariance()
+            self.twist = _TwistWithCovariance()
 
     class ArmJointState:
         def __init__(self) -> None:
@@ -215,6 +281,11 @@ def _load_acesim_bridge_module() -> ModuleType:
     setattr(rosgraph_msgs_module, "msg", rosgraph_msgs_msg_module)
     setattr(sensor_msgs_msg_module, "JointState", JointState)
     setattr(sensor_msgs_module, "msg", sensor_msgs_msg_module)
+    setattr(std_msgs_msg_module, "Float64MultiArray", Float64MultiArray)
+    setattr(std_msgs_msg_module, "MultiArrayDimension", MultiArrayDimension)
+    setattr(std_msgs_module, "msg", std_msgs_msg_module)
+    setattr(nav_msgs_msg_module, "Odometry", Odometry)
+    setattr(nav_msgs_module, "msg", nav_msgs_msg_module)
     setattr(px4_msgs_msg_module, "ArmJointState", ArmJointState)
     setattr(px4_msgs_module, "msg", px4_msgs_msg_module)
 
@@ -228,6 +299,10 @@ def _load_acesim_bridge_module() -> ModuleType:
     sys.modules["rosgraph_msgs.msg"] = rosgraph_msgs_msg_module
     sys.modules["sensor_msgs"] = sensor_msgs_module
     sys.modules["sensor_msgs.msg"] = sensor_msgs_msg_module
+    sys.modules["std_msgs"] = std_msgs_module
+    sys.modules["std_msgs.msg"] = std_msgs_msg_module
+    sys.modules["nav_msgs"] = nav_msgs_module
+    sys.modules["nav_msgs.msg"] = nav_msgs_msg_module
     sys.modules["px4_msgs"] = px4_msgs_module
     sys.modules["px4_msgs.msg"] = px4_msgs_msg_module
     package_module = types.ModuleType("acesim_ros2")
@@ -483,12 +558,13 @@ class AcesimBridgeTests(unittest.TestCase):
                   type: zmq_sub
                   endpoint: tcp://127.0.0.1:5600
                 topic: /acesim/clock
-            """)
+        """)
 
         last_socket = node._bridge_runtimes[0]._transport._socket
-        self.assertIn((2, 0), last_socket.sockopts)
-        self.assertIn((3, 1), last_socket.sockopts)
-        self.assertIn((4, 1), last_socket.sockopts)
+        zmq_module = sys.modules["zmq"]
+        self.assertIn((zmq_module.LINGER, 0), last_socket.sockopts)
+        self.assertIn((zmq_module.RCVHWM, 1), last_socket.sockopts)
+        self.assertIn((zmq_module.CONFLATE, 1), last_socket.sockopts)
         self.assertEqual(node._bridge_runtimes[0]._input_endpoint, "tcp://127.0.0.1:5600")
 
     def test_bridge_node_prefers_input_endpoint_override(self) -> None:
